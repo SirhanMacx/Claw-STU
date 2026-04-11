@@ -34,9 +34,11 @@ from clawstu.scheduler.registry import (
     TokenCost,
     default_registry,
 )
+from clawstu.scheduler.runner import SchedulerRunner
 
 __all__ = [
     "ProactiveContext",
+    "SchedulerRunner",
     "TaskRegistry",
     "TaskReport",
     "TaskRunFn",
