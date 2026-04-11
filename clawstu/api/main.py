@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from clawstu import __version__
-from clawstu.api import admin, profile, session
+from clawstu.api import admin, learners, profile, session
 from clawstu.api.state import AppState, get_state
 from clawstu.memory.store import BrainStore
 from clawstu.orchestrator.config import AppConfig
@@ -89,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(session.router)
     app.include_router(profile.router)
     app.include_router(admin.router)
+    app.include_router(learners.router)
     return app
 
 
