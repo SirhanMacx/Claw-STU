@@ -7,12 +7,17 @@ import inspect
 import pytest
 
 from clawstu.orchestrator.chain import ReasoningChain
+from clawstu.orchestrator.config import AppConfig, TaskRoute
 from clawstu.orchestrator.prompts import PromptLibrary
 from clawstu.orchestrator.providers import (
     EchoProvider,
     LLMMessage,
+    LLMResponse,
     ProviderError,
 )
+from clawstu.orchestrator.router import ModelRouter
+from clawstu.orchestrator.task_kinds import TaskKind
+from tests.conftest import async_router_for_testing
 
 
 class TestEchoProvider:
@@ -56,7 +61,7 @@ class TestPromptLibrary:
 
 class TestReasoningChain:
     async def test_chain_runs_template_and_returns_text(self) -> None:
-        chain = ReasoningChain(provider=EchoProvider())
+        chain = ReasoningChain(router=async_router_for_testing())
         out = await chain.run_template(
             "socratic_continuation",
             user_input="",
@@ -81,19 +86,46 @@ class TestReasoningChain:
                 max_tokens: int = 1024,
                 temperature: float = 0.2,
                 model: str | None = None,
-            ) -> object:
-                from clawstu.orchestrator.providers import LLMResponse
-
+            ) -> LLMResponse:
                 return LLMResponse(
                     text="Great question! You're so smart.",
                     provider=self.name,
                     model="sycophant-0",
                 )
 
-        chain = ReasoningChain(provider=SycophantProvider())
+        defaults = AppConfig().task_routing
+        cfg = AppConfig(
+            task_routing={
+                **defaults,
+                TaskKind.SOCRATIC_DIALOGUE: TaskRoute(
+                    provider="sycophant", model="sycophant-0"
+                ),
+            },
+            fallback_chain=("sycophant", "echo"),
+        )
+        router = ModelRouter(
+            config=cfg,
+            providers={"sycophant": SycophantProvider(), "echo": EchoProvider()},
+        )
+
+        chain = ReasoningChain(router=router)
         out = await chain.ask("anything")
         assert "great question" not in out.lower()
         assert "smart" not in out.lower()
+
+    async def test_chain_accepts_router_argument(self) -> None:
+        """Phase 2: ReasoningChain(router=...) is the new construction form."""
+        chain = ReasoningChain(router=async_router_for_testing())
+        out = await chain.run_template(
+            "socratic_continuation",
+            user_input="",
+            template_vars={
+                "concept": "c",
+                "tier": "meeting",
+                "student_utterance": "because",
+            },
+        )
+        assert isinstance(out, str) and out
 
 
 class TestAsyncProtocol:
