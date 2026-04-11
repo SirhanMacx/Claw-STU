@@ -34,7 +34,7 @@ class OpenRouterProvider:
         *,
         api_key: str | None,
         base_url: str = "https://openrouter.ai/api/v1",
-        client: httpx.Client | None = None,
+        client: httpx.AsyncClient | None = None,
         timeout: float = 60.0,
         referer: str = "https://github.com/SirhanMacx/Claw-STU",
         x_title: str = "Claw-STU",
@@ -44,11 +44,11 @@ class OpenRouterProvider:
         self._api_key: str = api_key
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        self._client = client or httpx.Client(timeout=timeout)
+        self._client = client or httpx.AsyncClient(timeout=timeout)
         self._referer = referer
         self._x_title = x_title
 
-    def complete(
+    async def complete(
         self,
         *,
         system: str,
@@ -66,7 +66,7 @@ class OpenRouterProvider:
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        body = self._post(payload)
+        body = await self._post(payload)
         return self._parse_body(body, model=effective_model)
 
     def _build_payload(
@@ -90,7 +90,7 @@ class OpenRouterProvider:
             "temperature": temperature,
         }
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST the payload and return the parsed JSON body.
 
         Raises ProviderError on network failure, non-2xx status, or
@@ -104,7 +104,7 @@ class OpenRouterProvider:
             "X-Title": self._x_title,
         }
         try:
-            http_response = self._client.post(
+            http_response = await self._client.post(
                 f"{self._base_url}/chat/completions",
                 json=payload,
                 headers=headers,

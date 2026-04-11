@@ -1,6 +1,7 @@
 """OpenRouterProvider — httpx.MockTransport-based contract tests."""
 from __future__ import annotations
 
+import inspect
 import json
 
 import httpx
@@ -14,11 +15,17 @@ from clawstu.orchestrator.providers import (
 )
 
 
+def test_openrouter_complete_is_async() -> None:
+    assert inspect.iscoroutinefunction(OpenRouterProvider.complete), (
+        "OpenRouterProvider.complete must be declared `async def` per Phase 2"
+    )
+
+
 def _make_provider(
     transport: httpx.MockTransport,
     api_key: str = "sk-or-test",
 ) -> OpenRouterProvider:
-    client = httpx.Client(transport=transport)
+    client = httpx.AsyncClient(transport=transport)
     return OpenRouterProvider(
         api_key=api_key,
         base_url="https://openrouter.ai/api/v1",
@@ -26,7 +33,7 @@ def _make_provider(
     )
 
 
-def test_openrouter_happy_path() -> None:
+async def test_openrouter_happy_path() -> None:
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -60,7 +67,7 @@ def test_openrouter_happy_path() -> None:
         )
 
     provider = _make_provider(httpx.MockTransport(handler))
-    response = provider.complete(
+    response = await provider.complete(
         system="You are Stuart.",
         messages=[LLMMessage(role="user", content="Hi?")],
         max_tokens=256,
@@ -94,7 +101,7 @@ def test_openrouter_missing_api_key_raises() -> None:
         OpenRouterProvider(api_key="")
 
 
-def test_openrouter_402_raises_provider_error() -> None:
+async def test_openrouter_402_raises_provider_error() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             402,
@@ -103,13 +110,13 @@ def test_openrouter_402_raises_provider_error() -> None:
 
     provider = _make_provider(httpx.MockTransport(handler))
     with pytest.raises(ProviderError, match="HTTP 402"):
-        provider.complete(
+        await provider.complete(
             system="sys",
             messages=[LLMMessage(role="user", content="hi")],
         )
 
 
-def test_openrouter_empty_choices_raises() -> None:
+async def test_openrouter_empty_choices_raises() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -123,7 +130,7 @@ def test_openrouter_empty_choices_raises() -> None:
 
     provider = _make_provider(httpx.MockTransport(handler))
     with pytest.raises(ProviderError, match="no choices"):
-        provider.complete(
+        await provider.complete(
             system="sys",
             messages=[LLMMessage(role="user", content="hi")],
         )
