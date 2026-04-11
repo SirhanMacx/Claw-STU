@@ -133,10 +133,21 @@ def load_config() -> AppConfig:
     """
     overrides: dict[str, object] = {}
     _apply_env_overrides(overrides)
-    return AppConfig(**overrides)
+    # `model_validate` accepts dict[str, Any] and keeps pydantic's own field
+    # validation without forcing mypy --strict to reconcile a `**dict[str,
+    # object]` spread against the per-field signature of BaseModel.__init__.
+    return AppConfig.model_validate(overrides)
 
 
 def _apply_env_overrides(overrides: dict[str, object]) -> None:
+    """Mutate `overrides` with any env-var-specified field values.
+
+    Empty-string env vars are preserved (e.g. `ANTHROPIC_API_KEY=""` sets
+    the field to `""`) because explicit emptiness is a valid operator
+    signal. `CLAW_STU_DATA_DIR` is the one exception: an empty string
+    would collapse to `Path(".")` which is nonsensical, so a truthy
+    guard is used for that field only.
+    """
     env_map: dict[str, str] = {
         "OLLAMA_BASE_URL": "ollama_base_url",
         "OLLAMA_API_KEY": "ollama_api_key",

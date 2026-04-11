@@ -85,15 +85,27 @@ def test_load_config_reads_env_var_api_keys(
 
     monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-abc")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://anthropic.test/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-def")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openai.test/v1")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-ghi")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://openrouter.test/v1")
+    monkeypatch.setenv("OLLAMA_API_KEY", "ollama-token")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:22222")
+    monkeypatch.setenv("STU_PRIMARY_PROVIDER", "openrouter")
 
     cfg = load_config()
+    # Every env var row in load_config's docstring must have a matching
+    # assertion here, otherwise a typo in env_map can ship silently.
     assert cfg.anthropic_api_key == "sk-ant-test-abc"
+    assert cfg.anthropic_base_url == "https://anthropic.test/v1"
     assert cfg.openai_api_key == "sk-test-def"
+    assert cfg.openai_base_url == "https://openai.test/v1"
     assert cfg.openrouter_api_key == "sk-or-test-ghi"
+    assert cfg.openrouter_base_url == "https://openrouter.test/v1"
+    assert cfg.ollama_api_key == "ollama-token"
     assert cfg.ollama_base_url == "http://localhost:22222"
+    assert cfg.primary_provider == "openrouter"
 
 
 def test_load_config_falls_back_to_defaults_without_env(
@@ -101,12 +113,19 @@ def test_load_config_falls_back_to_defaults_without_env(
 ) -> None:
     from clawstu.orchestrator.config import load_config
 
+    # Unset every env var load_config reads so ambient environment
+    # cannot pollute this test. If load_config grows a new env row,
+    # add it here too.
     for key in (
         "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
         "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
         "OPENROUTER_API_KEY",
+        "OPENROUTER_BASE_URL",
         "OLLAMA_API_KEY",
         "OLLAMA_BASE_URL",
+        "STU_PRIMARY_PROVIDER",
         "CLAW_STU_DATA_DIR",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -116,6 +135,8 @@ def test_load_config_falls_back_to_defaults_without_env(
     assert cfg.anthropic_api_key is None
     assert cfg.openai_api_key is None
     assert cfg.openrouter_api_key is None
+    assert cfg.ollama_api_key is None
+    assert cfg.primary_provider == "ollama"  # default from AppConfig
     assert cfg.data_dir == tmp_path
 
 
