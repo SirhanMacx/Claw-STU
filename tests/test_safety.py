@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from src.profile.model import AgeBracket
-from src.safety.boundaries import BoundaryEnforcer, ViolationKind
-from src.safety.content_filter import ContentDecision, ContentFilter
-from src.safety.escalation import CrisisKind, EscalationHandler
+from clawstu.profile.model import AgeBracket
+from clawstu.safety.boundaries import BoundaryEnforcer, ViolationKind
+from clawstu.safety.content_filter import ContentDecision, ContentFilter
+from clawstu.safety.escalation import CrisisKind, EscalationHandler
 
 
 class TestContentFilter:
@@ -82,7 +82,7 @@ class TestEscalationHandler:
 
     def test_resources_requires_detection(self) -> None:
         handler = EscalationHandler()
-        from src.safety.escalation import CrisisDetection
+        from clawstu.safety.escalation import CrisisDetection
 
         with pytest.raises(ValueError):
             handler.resources(CrisisDetection(detected=False))

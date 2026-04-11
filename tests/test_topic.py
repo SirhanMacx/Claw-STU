@@ -20,8 +20,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from src.curriculum.topic import Topic
-from src.profile.model import Domain
+from clawstu.curriculum.topic import Topic
+from clawstu.profile.model import Domain
 
 
 def test_from_student_input_happy_path() -> None:

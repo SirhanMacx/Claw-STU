@@ -12,10 +12,10 @@ project is broken in its stated core purpose.
 
 from __future__ import annotations
 
-from src.assessment.evaluator import EvaluationResult, Evaluator
-from src.assessment.generator import QuestionGenerator
-from src.engagement.session import SessionRunner
-from src.profile.model import Domain, Modality
+from clawstu.assessment.evaluator import EvaluationResult, Evaluator
+from clawstu.assessment.generator import QuestionGenerator
+from clawstu.engagement.session import SessionRunner
+from clawstu.profile.model import Domain, Modality
 
 
 def test_reteach_uses_different_modality_than_failed_one() -> None:

@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from src.assessment.crq import ConstructedResponseQuestion
-from src.assessment.evaluator import Evaluator
-from src.assessment.feedback import FeedbackGenerator
-from src.assessment.generator import (
+from clawstu.assessment.crq import ConstructedResponseQuestion
+from clawstu.assessment.evaluator import Evaluator
+from clawstu.assessment.feedback import FeedbackGenerator
+from clawstu.assessment.generator import (
     AssessmentItem,
     AssessmentType,
     QuestionGenerator,
 )
-from src.profile.model import ComplexityTier, Domain, Modality
+from clawstu.profile.model import ComplexityTier, Domain, Modality
 
 
 class TestQuestionGenerator:
@@ -112,7 +112,7 @@ class TestCRQWrapper:
 
 class TestFeedbackGenerator:
     def test_success_feedback_advances(self) -> None:
-        from src.assessment.evaluator import EvaluationResult
+        from clawstu.assessment.evaluator import EvaluationResult
 
         item = AssessmentItem(
             domain=Domain.US_HISTORY,
@@ -134,7 +134,7 @@ class TestFeedbackGenerator:
         assert "proud" not in feedback.message.lower()  # SOUL.md §Voice
 
     def test_growth_feedback_does_not_advance(self) -> None:
-        from src.assessment.evaluator import EvaluationResult
+        from clawstu.assessment.evaluator import EvaluationResult
 
         item = AssessmentItem(
             domain=Domain.US_HISTORY,

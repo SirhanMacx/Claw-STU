@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from src.assessment.evaluator import EvaluationResult
-from src.engagement.session import SessionPhase, SessionRunner
-from src.profile.model import Domain
+from clawstu.assessment.evaluator import EvaluationResult
+from clawstu.engagement.session import SessionPhase, SessionRunner
+from clawstu.profile.model import Domain
 
 
 def test_full_happy_path_session() -> None:
@@ -67,7 +67,7 @@ def test_close_writes_session_close_event() -> None:
         domain=Domain.US_HISTORY,
     )
     runner.close(profile, session)
-    from src.profile.model import EventKind
+    from clawstu.profile.model import EventKind
 
     kinds = {e.kind for e in profile.events}
     assert EventKind.SESSION_CLOSE in kinds

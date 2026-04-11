@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from src.orchestrator.chain import ReasoningChain
-from src.orchestrator.prompts import PromptLibrary
-from src.orchestrator.providers import (
+from clawstu.orchestrator.chain import ReasoningChain
+from clawstu.orchestrator.prompts import PromptLibrary
+from clawstu.orchestrator.providers import (
     EchoProvider,
     LLMMessage,
     ProviderError,
@@ -79,7 +79,7 @@ class TestReasoningChain:
                 max_tokens: int = 1024,
                 temperature: float = 0.2,
             ) -> object:
-                from src.orchestrator.providers import LLMResponse
+                from clawstu.orchestrator.providers import LLMResponse
 
                 return LLMResponse(
                     text="Great question! You're so smart.",

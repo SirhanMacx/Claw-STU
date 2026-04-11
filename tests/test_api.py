@@ -10,8 +10,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.main import create_app
-from src.api.state import AppState, get_state
+from clawstu.api.main import create_app
+from clawstu.api.state import AppState, get_state
 
 
 @pytest.fixture

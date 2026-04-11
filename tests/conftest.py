@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.engagement.session import Session, SessionRunner
-from src.profile.model import Domain, LearnerProfile
+from clawstu.engagement.session import Session, SessionRunner
+from clawstu.profile.model import Domain, LearnerProfile
 
 
 @pytest.fixture

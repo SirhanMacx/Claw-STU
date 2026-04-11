@@ -48,21 +48,8 @@ dev = [
     "mypy>=1.10",
 ]
 
-[tool.hatch.build]
-# Force hatch into "explicit" editable mode so the prefix-rewriting sources
-# mapping below does not trip hatchling's default editable-install detection
-# (which rejects prefix changes, see: https://github.com/pfmoore/editables/issues/20).
-# In editable mode the repo root is added to sys.path so `src.xxx` resolves;
-# the sources mapping still rewrites at wheel-build time so published wheels
-# expose the package as `clawstu`. Task 2 removes the mapping after the
-# `src` -> `clawstu` on-disk rename.
-dev-mode-dirs = ["."]
-
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
-
-[tool.hatch.build.targets.wheel.sources]
-"src" = "clawstu"
+packages = ["clawstu"]
 
 [project.scripts]
 clawstu = "clawstu.cli:main"
@@ -79,13 +66,13 @@ filterwarnings = [
 
 [tool.coverage.run]
 branch = true
-source = ["src"]
+source = ["clawstu"]
 omit = [
     # live_generator.py is LLM-backed and will be relocated to
-    # src/orchestrator/live_content.py in Phase 2 (per
+    # clawstu/orchestrator/live_content.py in Phase 2 (per
     # docs/superpowers/specs/2026-04-11-claw-stu-providers-memory-proactive-design.md
     # §4.1). Its tests land in that phase against the new location.
-    "src/curriculum/live_generator.py",
+    "clawstu/curriculum/live_generator.py",
 ]
 
 [tool.coverage.report]

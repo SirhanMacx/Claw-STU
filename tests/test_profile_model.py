@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.profile.export import export_to_json, import_from_json
-from src.profile.model import (
+from clawstu.profile.export import export_to_json, import_from_json
+from clawstu.profile.model import (
     AgeBracket,
     ComplexityTier,
     Domain,
@@ -14,7 +14,7 @@ from src.profile.model import (
     Modality,
     ObservationEvent,
 )
-from src.profile.observer import Observer
+from clawstu.profile.observer import Observer
 
 
 class TestAgeBracket:

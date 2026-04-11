@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.profile.model import (
+from clawstu.profile.model import (
     AgeBracket,
     ComplexityTier,
     Domain,
@@ -11,7 +11,7 @@ from src.profile.model import (
     Modality,
     ObservationEvent,
 )
-from src.profile.zpd import ZPDCalibrator
+from clawstu.profile.zpd import ZPDCalibrator
 
 
 def _profile() -> LearnerProfile:
