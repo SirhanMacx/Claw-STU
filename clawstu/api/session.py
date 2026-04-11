@@ -8,10 +8,16 @@ MVP endpoints:
 - `POST /sessions/{id}/finish-calibration` — transition to teaching
 - `POST /sessions/{id}/next` — ask for the next teach/check directive
 - `POST /sessions/{id}/check-answer` — submit a check-for-understanding answer
+- `POST /sessions/{id}/socratic` — ad-hoc student question (Phase 5)
 - `POST /sessions/{id}/close` — close the session
 
 Every handler is a thin adapter around `SessionRunner`. The runner
 contains the pedagogy; the handlers contain the HTTP.
+
+Phase 5: every student-text entry point runs `_GATE.scan(...)`
+before touching the runner. A crisis detection flips the session
+into `CRISIS_PAUSE` and returns the escalation resources; a boundary
+violation returns HTTP 400 with a restate message.
 """
 
 from __future__ import annotations
@@ -20,10 +26,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from clawstu.api.state import AppState, SessionBundle, get_state
-from clawstu.assessment.evaluator import Evaluator
+from clawstu.assessment.evaluator import EvaluationResult, Evaluator
 from clawstu.assessment.generator import AssessmentItem
 from clawstu.engagement.session import Session, SessionDirective, SessionPhase
 from clawstu.profile.model import Domain
+from clawstu.safety.boundaries import BoundaryEnforcer
+from clawstu.safety.escalation import EscalationHandler
+from clawstu.safety.gate import InboundDecision, InboundSafetyGate
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -32,6 +41,11 @@ class OnboardRequest(BaseModel):
     learner_id: str = Field(min_length=1, max_length=128)
     age: int = Field(ge=5, le=120)
     domain: Domain
+    # Phase 5: optional free-text topic. If present, the handler stores
+    # it on the session via the sync `runner.onboard(topic=...)` path.
+    # The live-content `onboard_with_topic` path lands in a later phase
+    # (it needs the orchestrator wired to the app-state).
+    topic: str | None = Field(default=None, max_length=200)
 
 
 class OnboardResponse(BaseModel):
@@ -50,11 +64,31 @@ class AnswerResponse(BaseModel):
     correct: bool
     score: float
     phase: SessionPhase
+    # Phase 5: crisis escalation payload. When `crisis` is True the
+    # session has been flipped to CRISIS_PAUSE and `resources` contains
+    # the escalation message. Other fields are zeroed.
+    crisis: bool = False
+    resources: str | None = None
 
 
 class DirectiveResponse(BaseModel):
     directive: SessionDirective
     session: Session
+    # Phase 5: mirrored crisis payload so clients that only call
+    # /check-answer get a uniform crisis signal.
+    crisis: bool = False
+    resources: str | None = None
+
+
+class SocraticRequest(BaseModel):
+    student_input: str = Field(min_length=1, max_length=2000)
+
+
+class SocraticResponse(BaseModel):
+    response: str
+    phase: SessionPhase
+    crisis: bool = False
+    resources: str | None = None
 
 
 class CloseResponse(BaseModel):
@@ -62,6 +96,12 @@ class CloseResponse(BaseModel):
 
 
 _evaluator = Evaluator()
+
+# Module-level gate. Stateless and safe to share across concurrent
+# handlers. Tests can monkey-patch this with `api_session._GATE = ...`.
+_GATE: InboundSafetyGate = InboundSafetyGate(
+    EscalationHandler(), BoundaryEnforcer()
+)
 
 
 def _bundle(state: AppState, session_id: str) -> SessionBundle:
@@ -78,6 +118,36 @@ def _item_by_id(items: tuple[AssessmentItem, ...], item_id: str) -> AssessmentIt
     raise HTTPException(status_code=404, detail=f"unknown item: {item_id}")
 
 
+def _halt_for_crisis(
+    state: AppState,
+    bundle: SessionBundle,
+    decision: InboundDecision,
+) -> str:
+    """Flip the session into CRISIS_PAUSE and return the resource text.
+
+    Called from every student-text handler when the gate reports a
+    crisis. The handler then wraps the returned text in whatever
+    response shape it's supposed to serialize.
+    """
+    assert decision.action == "crisis"
+    assert decision.crisis_detection is not None
+    bundle.session.phase = SessionPhase.CRISIS_PAUSE
+    state.checkpoint(bundle.session.id)
+    return _GATE.escalation.resources(decision.crisis_detection)
+
+
+def _halt_for_boundary(decision: InboundDecision) -> HTTPException:
+    """Convert a boundary violation into a 400 HTTPException.
+
+    The detail surfaces the canonical restate message from the
+    enforcer so the client has something to show the user.
+    """
+    assert decision.action == "boundary"
+    assert decision.boundary_violation is not None
+    restate = BoundaryEnforcer.restate(decision.boundary_violation)
+    return HTTPException(status_code=400, detail=restate)
+
+
 @router.post("", response_model=OnboardResponse, status_code=201)
 def onboard(
     request: OnboardRequest,
@@ -88,6 +158,7 @@ def onboard(
             learner_id=request.learner_id,
             age=request.age,
             domain=request.domain,
+            topic=request.topic,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -120,6 +191,21 @@ def submit_calibration_answer(
             status_code=409,
             detail=f"session is in phase {bundle.session.phase}, not calibrating",
         )
+    # Phase 5: every student-text entry point runs the inbound safety
+    # gate BEFORE the runner sees the response.
+    decision = _GATE.scan(request.response)
+    if decision.action == "crisis":
+        resources = _halt_for_crisis(state, bundle, decision)
+        return AnswerResponse(
+            correct=False,
+            score=0.0,
+            phase=bundle.session.phase,
+            crisis=True,
+            resources=resources,
+        )
+    if decision.action == "boundary":
+        raise _halt_for_boundary(decision)
+
     items = state.runner.calibration_items(bundle.session)
     item = _item_by_id(items, request.item_id)
     result = _evaluator.evaluate(item, request.response)
@@ -165,6 +251,22 @@ def submit_check_answer(
     state: AppState = Depends(get_state),
 ) -> DirectiveResponse:
     bundle = _bundle(state, session_id)
+    # Phase 5: gate the inbound student text before anything else.
+    decision = _GATE.scan(request.response)
+    if decision.action == "crisis":
+        resources = _halt_for_crisis(state, bundle, decision)
+        # A crisis pause returns a CRISIS_PAUSE directive; the client
+        # MUST interpret `crisis=True` and surface the resources.
+        directive = state.runner.next_directive(bundle.profile, bundle.session)
+        return DirectiveResponse(
+            directive=directive,
+            session=bundle.session,
+            crisis=True,
+            resources=resources,
+        )
+    if decision.action == "boundary":
+        raise _halt_for_boundary(decision)
+
     item = state.runner.select_check(bundle.session)
     if item.id != request.item_id:
         raise HTTPException(
@@ -173,7 +275,7 @@ def submit_check_answer(
                 f"item mismatch: expected {item.id}, got {request.item_id}"
             ),
         )
-    result = _evaluator.evaluate(item, request.response)
+    result: EvaluationResult = _evaluator.evaluate(item, request.response)
     state.runner.record_check(
         bundle.profile,
         bundle.session,
@@ -183,6 +285,39 @@ def submit_check_answer(
     )
     directive = state.runner.next_directive(bundle.profile, bundle.session)
     return DirectiveResponse(directive=directive, session=bundle.session)
+
+
+@router.post("/{session_id}/socratic", response_model=SocraticResponse)
+def socratic(
+    session_id: str,
+    request: SocraticRequest,
+    state: AppState = Depends(get_state),
+) -> SocraticResponse:
+    """Ad-hoc student question routed through the safety gate.
+
+    Phase 5 ships the safety choke point and a placeholder echo
+    response. The real Socratic dialogue (orchestrator-backed
+    `ReasoningChain`) lands in Phase 6+; Phase 5 only guarantees
+    that the student-text entry point is gated.
+    """
+    bundle = _bundle(state, session_id)
+    decision = _GATE.scan(request.student_input)
+    if decision.action == "crisis":
+        resources = _halt_for_crisis(state, bundle, decision)
+        return SocraticResponse(
+            response=resources,
+            phase=bundle.session.phase,
+            crisis=True,
+            resources=resources,
+        )
+    if decision.action == "boundary":
+        raise _halt_for_boundary(decision)
+
+    # Phase 5 placeholder — real Socratic dialogue lands in Phase 6+.
+    return SocraticResponse(
+        response="I hear you. Tell me more.",
+        phase=bundle.session.phase,
+    )
 
 
 @router.post("/{session_id}/close", response_model=CloseResponse)

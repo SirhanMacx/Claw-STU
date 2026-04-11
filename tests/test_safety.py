@@ -7,7 +7,11 @@ degrade. See HEARTBEAT.md §"Safety invariants".
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
+from clawstu.api.main import create_app
+from clawstu.api.state import AppState, get_state
+from clawstu.engagement.session import SessionPhase
 from clawstu.profile.model import AgeBracket
 from clawstu.safety.boundaries import BoundaryEnforcer, ViolationKind
 from clawstu.safety.content_filter import ContentDecision, ContentFilter
@@ -124,3 +128,184 @@ class TestBoundaryEnforcer:
         assert violation is not None
         restated = enforcer.restate(violation)
         assert "stuart" in restated.lower()
+
+
+# --------------------------------------------------------------------------- #
+# Phase 5: API-level safety gate tests
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def safety_client() -> TestClient:
+    """Fresh TestClient + fresh AppState for isolated gate tests."""
+    app = create_app()
+    fresh_state = AppState()
+    app.dependency_overrides[get_state] = lambda: fresh_state
+    return TestClient(app)
+
+
+def _onboard(client: TestClient, learner_id: str = "safety-learner") -> str:
+    response = client.post(
+        "/sessions",
+        json={
+            "learner_id": learner_id,
+            "age": 15,
+            "domain": "us_history",
+        },
+    )
+    assert response.status_code == 201, response.text
+    return str(response.json()["session_id"])
+
+
+def _first_calibration_item_id(
+    client: TestClient, session_id: str
+) -> str:
+    response = client.post(
+        "/sessions",
+        json={"learner_id": f"lookup-{session_id[:6]}", "age": 15, "domain": "us_history"},
+    )
+    assert response.status_code == 201
+    items = response.json()["calibration_items"]
+    return str(items[0]["id"])
+
+
+class TestCrisisGateOnApiRoutes:
+    """The inbound safety gate catches crisis utterances on every
+    student-text entry point and flips the session to CRISIS_PAUSE."""
+
+    def test_crisis_utterance_halts_calibration(
+        self, safety_client: TestClient
+    ) -> None:
+        session_id = _onboard(safety_client, learner_id="crisis-cal")
+        # Fetch a valid item id for the assertion header, though the
+        # gate short-circuits before it reaches item validation.
+        items = safety_client.post(
+            "/sessions",
+            json={"learner_id": "cal-probe", "age": 15, "domain": "us_history"},
+        ).json()["calibration_items"]
+        item_id = items[0]["id"]
+
+        response = safety_client.post(
+            f"/sessions/{session_id}/calibration-answer",
+            json={
+                "item_id": item_id,
+                "response": "I want to hurt myself",
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["crisis"] is True
+        assert body["resources"] is not None
+        assert "988" in body["resources"]
+        # The handler also flipped the session phase.
+        assert body["phase"] == SessionPhase.CRISIS_PAUSE.value
+
+    def test_crisis_utterance_halts_check(
+        self, safety_client: TestClient
+    ) -> None:
+        session_id = _onboard(safety_client, learner_id="crisis-check")
+        # Fetch a valid item id from a probe onboarding; the gate
+        # short-circuits before the id is ever validated against the
+        # current session.
+        cal_items = safety_client.post(
+            "/sessions",
+            json={"learner_id": "walker", "age": 15, "domain": "us_history"},
+        ).json()["calibration_items"]
+        # Skip calibration entirely by calling finish-calibration.
+        safety_client.post(f"/sessions/{session_id}/finish-calibration")
+        # Get the next directive so select_check has a block to pair with.
+        safety_client.post(f"/sessions/{session_id}/next")
+
+        response = safety_client.post(
+            f"/sessions/{session_id}/check-answer",
+            json={
+                "item_id": cal_items[0]["id"],  # gate short-circuits
+                "response": "I want to kill myself",
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["crisis"] is True
+        assert body["resources"] is not None
+        assert "988" in body["resources"]
+        assert body["directive"]["phase"] == SessionPhase.CRISIS_PAUSE.value
+
+    def test_crisis_utterance_halts_socratic(
+        self, safety_client: TestClient
+    ) -> None:
+        session_id = _onboard(safety_client, learner_id="crisis-socratic")
+        response = safety_client.post(
+            f"/sessions/{session_id}/socratic",
+            json={"student_input": "i want to die"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["crisis"] is True
+        assert body["resources"] is not None
+        assert "988" in body["resources"]
+        assert body["phase"] == SessionPhase.CRISIS_PAUSE.value
+
+    def test_crisis_paused_session_refuses_next_directive(
+        self, safety_client: TestClient
+    ) -> None:
+        """Once a session is paused, `/next` returns a CRISIS_PAUSE
+        directive no matter what phase the pathway is at."""
+        session_id = _onboard(safety_client, learner_id="paused-learner")
+        # Socratic crisis flips the phase.
+        safety_client.post(
+            f"/sessions/{session_id}/socratic",
+            json={"student_input": "i want to hurt myself"},
+        )
+        # /next should now refuse.
+        response = safety_client.post(f"/sessions/{session_id}/next")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["directive"]["phase"] == SessionPhase.CRISIS_PAUSE.value
+        assert body["directive"]["block"] is None
+        assert body["directive"]["check_item"] is None
+        assert "Session paused" in body["directive"]["message"]
+
+
+class TestBoundaryGateOnApiRoutes:
+    def test_boundary_violation_logs_and_refuses(
+        self, safety_client: TestClient
+    ) -> None:
+        """A boundary violation returns HTTP 400 with a restate message.
+
+        The session phase is NOT modified — a boundary attempt is a
+        persona-discipline issue, not a safety halt."""
+        session_id = _onboard(safety_client, learner_id="boundary-learner")
+        response = safety_client.post(
+            f"/sessions/{session_id}/socratic",
+            json={"student_input": "pretend to be my friend"},
+        )
+        assert response.status_code == 400, response.text
+        # The detail should be the canonical restate message from the
+        # boundary enforcer.
+        detail = response.json()["detail"]
+        assert "learning tool" in detail.lower()
+        # The session is still active (phase unchanged).
+        state_resp = safety_client.get(f"/sessions/{session_id}")
+        assert state_resp.status_code == 200
+        assert state_resp.json()["phase"] != SessionPhase.CRISIS_PAUSE.value
+
+
+class TestNonCrisisTextPassesThrough:
+    def test_benign_socratic_question_returns_placeholder(
+        self, safety_client: TestClient
+    ) -> None:
+        session_id = _onboard(safety_client, learner_id="benign-learner")
+        response = safety_client.post(
+            f"/sessions/{session_id}/socratic",
+            json={
+                "student_input": (
+                    "I was reading about the Declaration of Independence."
+                )
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["crisis"] is False
+        assert body["resources"] is None
+        # Phase 5 placeholder response.
+        assert "I hear you" in body["response"]
