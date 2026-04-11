@@ -7,6 +7,7 @@ of content that touches the student passes through this layer.
 from clawstu.safety.boundaries import BoundaryEnforcer, BoundaryViolation
 from clawstu.safety.content_filter import ContentDecision, ContentFilter
 from clawstu.safety.escalation import CrisisDetection, EscalationHandler
+from clawstu.safety.gate import InboundDecision, InboundSafetyGate
 
 __all__ = [
     "BoundaryEnforcer",
@@ -15,4 +16,6 @@ __all__ = [
     "ContentFilter",
     "CrisisDetection",
     "EscalationHandler",
+    "InboundDecision",
+    "InboundSafetyGate",
 ]
