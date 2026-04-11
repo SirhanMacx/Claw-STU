@@ -57,8 +57,16 @@ class LLMProvider(Protocol):
         messages: list[LLMMessage],
         max_tokens: int = 1024,
         temperature: float = 0.2,
+        model: str | None = None,
     ) -> LLMResponse:
-        """Synchronous completion. Raises `ProviderError` on failure."""
+        """Synchronous completion. Raises `ProviderError` on failure.
+
+        The optional ``model`` kwarg lets a caller override the
+        provider's default model on a per-call basis. This is what the
+        TaskKind → (provider, model) routing table (Task 5) uses so a
+        single provider instance can serve multiple TaskKinds backed by
+        different models.
+        """
         ...
 
 
@@ -87,6 +95,7 @@ class EchoProvider:
         messages: list[LLMMessage],
         max_tokens: int = 1024,
         temperature: float = 0.2,
+        model: str | None = None,
     ) -> LLMResponse:
         if not messages:
             raise ProviderError("EchoProvider requires at least one message")
@@ -100,7 +109,7 @@ class EchoProvider:
         return LLMResponse(
             text=reply,
             provider=self.name,
-            model=self.model,
+            model=model or self.model,
             finish_reason="stop",
             metadata={
                 "system_len": str(len(system)),
