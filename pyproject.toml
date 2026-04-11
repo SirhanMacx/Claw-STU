@@ -58,6 +58,13 @@ filterwarnings = [
 [tool.coverage.run]
 branch = true
 source = ["src"]
+omit = [
+    # live_generator.py is LLM-backed and will be relocated to
+    # src/orchestrator/live_content.py in Phase 2 (per
+    # docs/superpowers/specs/2026-04-11-claw-stu-providers-memory-proactive-design.md
+    # §4.1). Its tests land in that phase against the new location.
+    "src/curriculum/live_generator.py",
+]
 
 [tool.coverage.report]
 show_missing = true
