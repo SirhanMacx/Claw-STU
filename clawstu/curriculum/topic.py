@@ -5,7 +5,7 @@ they want to learn — "photosynthesis", "the French Revolution", "why
 does ice float", "recursion in Python" — and Stuart builds a session
 around that topic.
 
-The `Domain` enum in `src.profile.model` is kept as a **coarse
+The `Domain` enum in `clawstu.profile.model` is kept as a **coarse
 classification tag** so the learner profile can note "this was a
 science topic" vs. "this was a history topic" for future adaptation.
 It is NOT a gate on what a student is allowed to ask about. The canonical

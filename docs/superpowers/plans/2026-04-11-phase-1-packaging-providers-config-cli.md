@@ -247,6 +247,16 @@ imports because editable install exposes both namespaces."
 
 ### Task 2: Rewrite `from src.xxx` imports → `from clawstu.xxx`
 
+> **Execution note (post-Task-1 revision):** Task 2 was expanded during
+> execution to include a physical `git mv src clawstu` rename and a
+> `pyproject.toml` cleanup that removes the Task 1 `dev-mode-dirs`
+> workaround. This was necessary because hatchling's editable-install
+> detection (`wheel.py:555-566`) cannot handle prefix-rewriting sources
+> mappings, which was discovered in Task 1. See commit `601ee84` for
+> the actual delta and its commit message for the rationale. The plan
+> text below still describes the pre-expansion approach for historical
+> reference.
+
 **Files:**
 - Modify: every `.py` file under `src/` (35 files)
 - Modify: every `.py` file under `tests/` (11 files)

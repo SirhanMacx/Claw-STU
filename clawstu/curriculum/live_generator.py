@@ -385,7 +385,7 @@ def _require_str(payload: dict[str, Any], key: str) -> str:
 
 
 # Rebind the public name for Domain so tests importing it via this
-# module don't have to reach into src.profile.model directly.
+# module don't have to reach into clawstu.profile.model directly.
 __all__ = [
     "Domain",
     "LiveContentGenerator",

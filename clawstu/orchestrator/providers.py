@@ -8,7 +8,7 @@ and local development, and to let contributors iterate without API
 keys.
 
 Concrete network-backed providers live in separate modules (post-MVP)
-and are loaded lazily so importing `src.orchestrator` never forces a
+and are loaded lazily so importing `clawstu.orchestrator` never forces a
 network dependency.
 """
 

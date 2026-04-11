@@ -15,8 +15,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CLAWSTU = REPO_ROOT / "clawstu"
 TESTS = REPO_ROOT / "tests"
 
-_BAD_FROM = re.compile(r"^\s*from\s+src(\.|\s)")
-_BAD_IMPORT = re.compile(r"^\s*import\s+src(\.|\s)")
+_BAD_FROM = re.compile(r"^\s*from\s+src(\.|\s|$)")
+_BAD_IMPORT = re.compile(r"^\s*import\s+src(\.|\s|$)")
 
 
 def _python_files(root: Path) -> list[Path]:

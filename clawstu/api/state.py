@@ -6,7 +6,7 @@ persistence layer. For local development and the first MVP demo it is
 enough; for any real deployment, this is replaced by SQLite or a real
 database before the guardian dashboard ships.
 
-Everything in here is private to `src.api`. No other module should
+Everything in here is private to `clawstu.api`. No other module should
 import from this file.
 """
 
