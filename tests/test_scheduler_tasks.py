@@ -278,6 +278,49 @@ class TestSpacedReviewTask:
             "industrialization",
         ]
 
+    async def test_non_review_events_are_ignored(
+        self,
+        context: ProactiveContext,
+        persistence: InMemoryPersistentStore,
+    ) -> None:
+        # SESSION_START / VOLUNTARY_QUESTION / etc. should be skipped.
+        persistence.events.append(
+            ObservationEvent(
+                kind=EventKind.SESSION_START,
+                domain=Domain.US_HISTORY,
+                concept="reconstruction",
+                timestamp=datetime.now(UTC) - timedelta(days=30),
+            ),
+            learner_id="alice",
+            session_id=None,
+        )
+        report = await spaced_review.run(context, "alice")
+        assert report.details["stale_concept_count"] == 0
+
+    async def test_review_events_without_concept_are_ignored(
+        self,
+        context: ProactiveContext,
+        persistence: InMemoryPersistentStore,
+    ) -> None:
+        # A check-for-understanding event with concept=None should be
+        # skipped — there's nothing to file under.
+        persistence.events.append(
+            ObservationEvent(
+                kind=EventKind.CHECK_FOR_UNDERSTANDING,
+                domain=Domain.US_HISTORY,
+                modality=Modality.SOCRATIC_DIALOGUE,
+                tier=ComplexityTier.MEETING,
+                correct=True,
+                latency_seconds=10.0,
+                concept=None,
+                timestamp=datetime.now(UTC) - timedelta(days=30),
+            ),
+            learner_id="alice",
+            session_id=None,
+        )
+        report = await spaced_review.run(context, "alice")
+        assert report.details["stale_concept_count"] == 0
+
     async def test_most_recent_event_per_concept_wins(
         self,
         context: ProactiveContext,
@@ -366,6 +409,32 @@ class TestRefreshZpdTask:
             ObservationEvent(
                 kind=EventKind.MODALITY_ENGAGEMENT,
                 domain=Domain.US_HISTORY,
+                concept="reconstruction",
+                timestamp=datetime.now(UTC),
+            ),
+            learner_id="alice",
+            session_id=None,
+        )
+        report = await refresh_zpd.run(context, "alice")
+        assert report.outcome == "success"
+        assert report.details["events_replayed"] == 0
+
+    async def test_skips_review_events_with_correct_unset(
+        self,
+        context: ProactiveContext,
+        persistence: InMemoryPersistentStore,
+    ) -> None:
+        _learner(persistence, "alice")
+        # A check_for_understanding event with correct=None (e.g.
+        # one that timed out without grading) should be skipped by
+        # the replay loop even though its kind is in _REPLAY_KINDS.
+        persistence.events.append(
+            ObservationEvent(
+                kind=EventKind.CHECK_FOR_UNDERSTANDING,
+                domain=Domain.US_HISTORY,
+                modality=Modality.SOCRATIC_DIALOGUE,
+                tier=ComplexityTier.MEETING,
+                correct=None,
                 concept="reconstruction",
                 timestamp=datetime.now(UTC),
             ),

@@ -18,9 +18,9 @@ Layer dependency table (authoritative for Phase 2 and beyond):
     orchestrator    stdlib, pydantic, safety, profile, memory,
                     curriculum, assessment
     persistence     stdlib, pydantic, profile, engagement
-    api             any of the above
     scheduler       stdlib, pydantic, profile, orchestrator, memory,
                     persistence, engagement
+    api             any of the above (including scheduler)
 
 `cli` is an `api`-like top layer and may import from everything.
 
@@ -87,6 +87,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "engagement",
             "orchestrator",
             "persistence",
+            "scheduler",
         }
     ),
     "scheduler": frozenset(
