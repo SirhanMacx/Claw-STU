@@ -50,7 +50,7 @@ class LLMProvider(Protocol):
 
     name: str
 
-    def complete(
+    async def complete(
         self,
         *,
         system: str,
@@ -59,13 +59,11 @@ class LLMProvider(Protocol):
         temperature: float = 0.2,
         model: str | None = None,
     ) -> LLMResponse:
-        """Synchronous completion. Raises `ProviderError` on failure.
+        """Asynchronous completion. Raises `ProviderError` on failure.
 
-        The optional ``model`` kwarg lets a caller override the
-        provider's default model on a per-call basis. This is what the
-        TaskKind → (provider, model) routing table (Task 5) uses so a
-        single provider instance can serve multiple TaskKinds backed by
-        different models.
+        Phase 2 (spec §4.2.1.a) flipped this to `async def`. All
+        concrete providers use `httpx.AsyncClient` and every call
+        site must `await` the result.
         """
         ...
 
@@ -88,7 +86,7 @@ class EchoProvider:
     def __init__(self, *, model: str = "echo-0") -> None:
         self.model = model
 
-    def complete(
+    async def complete(
         self,
         *,
         system: str,

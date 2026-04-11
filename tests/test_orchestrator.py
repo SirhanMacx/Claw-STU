@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from clawstu.orchestrator.chain import ReasoningChain
@@ -14,9 +16,9 @@ from clawstu.orchestrator.providers import (
 
 
 class TestEchoProvider:
-    def test_returns_echo_of_last_user_message(self) -> None:
+    async def test_returns_echo_of_last_user_message(self) -> None:
         provider = EchoProvider()
-        response = provider.complete(
+        response = await provider.complete(
             system="sys",
             messages=[LLMMessage(role="user", content="hello")],
         )
@@ -24,10 +26,10 @@ class TestEchoProvider:
         assert "hello" in response.text
         assert response.provider == "echo"
 
-    def test_requires_user_message(self) -> None:
+    async def test_requires_user_message(self) -> None:
         provider = EchoProvider()
         with pytest.raises(ProviderError):
-            provider.complete(system="sys", messages=[])
+            await provider.complete(system="sys", messages=[])
 
 
 class TestPromptLibrary:
@@ -53,9 +55,9 @@ class TestPromptLibrary:
 
 
 class TestReasoningChain:
-    def test_chain_runs_template_and_returns_text(self) -> None:
+    async def test_chain_runs_template_and_returns_text(self) -> None:
         chain = ReasoningChain(provider=EchoProvider())
-        out = chain.run_template(
+        out = await chain.run_template(
             "socratic_continuation",
             user_input="",
             template_vars={
@@ -67,17 +69,18 @@ class TestReasoningChain:
         assert isinstance(out, str)
         assert out != ""
 
-    def test_chain_rewrites_outbound_sycophancy(self) -> None:
+    async def test_chain_rewrites_outbound_sycophancy(self) -> None:
         class SycophantProvider:
             name = "sycophant"
 
-            def complete(
+            async def complete(
                 self,
                 *,
                 system: str,
                 messages: list[LLMMessage],
                 max_tokens: int = 1024,
                 temperature: float = 0.2,
+                model: str | None = None,
             ) -> object:
                 from clawstu.orchestrator.providers import LLMResponse
 
@@ -88,6 +91,22 @@ class TestReasoningChain:
                 )
 
         chain = ReasoningChain(provider=SycophantProvider())
-        out = chain.ask("anything")
+        out = await chain.ask("anything")
         assert "great question" not in out.lower()
         assert "smart" not in out.lower()
+
+
+class TestAsyncProtocol:
+    """The LLMProvider.complete method must be declared async.
+
+    Phase 2 hard contract (spec §4.2.1.a): every provider call is
+    awaited, so both the Protocol and every concrete provider must
+    declare `async def complete`. This test pins the contract against
+    future regressions.
+    """
+
+    def test_echo_provider_complete_is_coroutine(self) -> None:
+        assert inspect.iscoroutinefunction(EchoProvider.complete), (
+            "EchoProvider.complete must be declared `async def` "
+            "per spec §4.2.1.a"
+        )

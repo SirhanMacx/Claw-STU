@@ -197,7 +197,7 @@ class LiveContentGenerator:
         self._provider = provider
         self._safety = safety or _SafetyGate()
 
-    def generate_pathway(
+    async def generate_pathway(
         self,
         *,
         topic: Topic,
@@ -213,7 +213,7 @@ class LiveContentGenerator:
                 f"Age bracket: {age_bracket.value}\n"
                 f"Maximum concepts: {max_concepts}"
             )
-            payload = self._ask_json(system=_PATHWAY_SYSTEM, user=user)
+            payload = await self._ask_json(system=_PATHWAY_SYSTEM, user=user)
             raw_concepts = payload.get("concepts")
             if not isinstance(raw_concepts, list) or not raw_concepts:
                 raise LiveGenerationError(
@@ -225,7 +225,7 @@ class LiveContentGenerator:
             raise LiveGenerationError("pathway generator produced no concepts")
         return tuple(concepts)
 
-    def generate_block(
+    async def generate_block(
         self,
         *,
         topic: Topic,
@@ -247,7 +247,7 @@ class LiveContentGenerator:
                 f"Complexity tier: {tier.value}\n"
                 f"Age bracket: {age_bracket.value}"
             )
-            payload = self._ask_json(system=_BLOCK_SYSTEM, user=user)
+            payload = await self._ask_json(system=_BLOCK_SYSTEM, user=user)
 
         title = _require_str(payload, "title")
         body = _require_str(payload, "body")
@@ -269,7 +269,7 @@ class LiveContentGenerator:
             estimated_minutes=estimated,
         )
 
-    def generate_check(
+    async def generate_check(
         self,
         *,
         topic: Topic,
@@ -288,7 +288,7 @@ class LiveContentGenerator:
                 f"Complexity tier: {tier.value}\n"
                 f"Age bracket: {age_bracket.value}"
             )
-            payload = self._ask_json(system=_CHECK_SYSTEM, user=user)
+            payload = await self._ask_json(system=_CHECK_SYSTEM, user=user)
 
         prompt_text = _require_str(payload, "prompt")
         type_value = _require_str(payload, "type")
@@ -346,10 +346,10 @@ class LiveContentGenerator:
 
     # -- internals --------------------------------------------------------
 
-    def _ask_json(self, *, system: str, user: str) -> dict[str, Any]:
+    async def _ask_json(self, *, system: str, user: str) -> dict[str, Any]:
         """Ask the provider for a JSON object and parse it strictly."""
         try:
-            response = self._provider.complete(
+            response = await self._provider.complete(
                 system=system,
                 messages=[LLMMessage(role="user", content=user)],
             )

@@ -36,7 +36,7 @@ class ReasoningChain:
         self._prompts = prompts or PromptLibrary()
         self._boundaries = boundaries or BoundaryEnforcer()
 
-    def run_template(
+    async def run_template(
         self,
         template_name: str,
         *,
@@ -53,7 +53,7 @@ class ReasoningChain:
         rendered = template.render(**(template_vars or {}))
         messages = [LLMMessage(role="user", content=rendered)]
         try:
-            response: LLMResponse = self._provider.complete(
+            response: LLMResponse = await self._provider.complete(
                 system=self._prompts.soul_system(),
                 messages=messages,
             )
@@ -65,11 +65,11 @@ class ReasoningChain:
             return self._boundaries.restate(violation)
         return text
 
-    def ask(self, user_input: str) -> str:
+    async def ask(self, user_input: str) -> str:
         """Run an ad-hoc prompt. Used by free-form Socratic dialogue."""
         messages = [LLMMessage(role="user", content=user_input)]
         try:
-            response = self._provider.complete(
+            response = await self._provider.complete(
                 system=self._prompts.soul_system(),
                 messages=messages,
             )
