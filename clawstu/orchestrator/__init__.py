@@ -9,19 +9,41 @@ bespoke feedback).
 """
 
 from clawstu.orchestrator.chain import ReasoningChain
+from clawstu.orchestrator.config import (
+    AppConfig,
+    TaskRoute,
+    ensure_data_dir,
+    load_config,
+)
 from clawstu.orchestrator.prompts import PromptLibrary
+from clawstu.orchestrator.provider_anthropic import AnthropicProvider
+from clawstu.orchestrator.provider_ollama import OllamaProvider
+from clawstu.orchestrator.provider_openai import OpenAIProvider
+from clawstu.orchestrator.provider_openrouter import OpenRouterProvider
 from clawstu.orchestrator.providers import (
     EchoProvider,
+    LLMMessage,
     LLMProvider,
     LLMResponse,
     ProviderError,
 )
+from clawstu.orchestrator.task_kinds import TaskKind
 
 __all__ = [
+    "AnthropicProvider",
+    "AppConfig",
     "EchoProvider",
+    "LLMMessage",
     "LLMProvider",
     "LLMResponse",
+    "OllamaProvider",
+    "OpenAIProvider",
+    "OpenRouterProvider",
     "PromptLibrary",
     "ProviderError",
     "ReasoningChain",
+    "TaskKind",
+    "TaskRoute",
+    "ensure_data_dir",
+    "load_config",
 ]
