@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -16,7 +17,7 @@ jobs:
         python-version: ["3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -56,21 +57,20 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install build tools
-        run: python -m pip install --upgrade pip build twine
+        run: python -m pip install --upgrade pip build twine pkginfo
       - name: Build sdist + wheel
         run: python -m build
       - name: Verify distribution name
         run: |
           ls dist/
-          python -m pip install --quiet pkginfo
-          python -c "
+          python <<'PY'
           import glob, pkginfo
           sdists = glob.glob('dist/clawstu-*.tar.gz')
           assert len(sdists) == 1, sdists
           p = pkginfo.SDist(sdists[0])
           assert p.name == 'clawstu', p.name
-          print(f'Verified: {p.name} {p.version}')
-          "
+          print(f"Verified: {p.name} {p.version}")
+          PY
       - name: Publish to PyPI
         # No `|| echo` fallback: real twine failures must fail the job.
         # --skip-existing handles the benign "version already uploaded" case.
