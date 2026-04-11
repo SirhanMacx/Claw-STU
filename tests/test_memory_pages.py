@@ -6,13 +6,21 @@ from datetime import UTC, datetime
 
 import pytest
 
-from clawstu.memory.pages.base import (
+from clawstu.memory.pages import (
     BrainPage,
+    ConceptPage,
+    LearnerPage,
+    MisconceptionPage,
     PageKind,
+    SessionPage,
+    SourcePage,
     TimelineEntry,
+    TopicPage,
     parse_frontmatter,
     render_frontmatter,
 )
+
+# -- base-class behavior ---------------------------------------------
 
 
 def test_render_frontmatter_emits_delimited_block() -> None:
@@ -126,3 +134,133 @@ def test_append_timeline_bumps_updated_at() -> None:
 def test_render_frontmatter_rejects_unsupported_scalar() -> None:
     with pytest.raises(TypeError, match="unsupported frontmatter"):
         render_frontmatter({"tags": ["not", "allowed"]})
+
+
+# -- LearnerPage -----------------------------------------------------
+
+
+def test_learner_page_round_trip() -> None:
+    original = LearnerPage(
+        learner_id="test-learner",
+        compiled_truth="Visual learner; avoid dense text blocks.",
+        timeline=[
+            TimelineEntry(
+                timestamp=datetime(2026, 4, 11, 14, 20, 0, tzinfo=UTC),
+                kind="session_close",
+                text="40 minutes, 3 blocks, 1 reteach",
+            ),
+        ],
+    )
+    parsed = LearnerPage.parse(original.render())
+    assert parsed.learner_id == "test-learner"
+    assert parsed.compiled_truth == "Visual learner; avoid dense text blocks."
+    assert len(parsed.timeline) == 1
+    assert parsed.timeline[0].kind == "session_close"
+
+
+def test_learner_page_parse_rejects_wrong_kind() -> None:
+    page = ConceptPage(
+        learner_id="l1", concept_id="civil_war", compiled_truth="x"
+    )
+    with pytest.raises(ValueError, match="expected kind=learner"):
+        LearnerPage.parse(page.render())
+
+
+# -- ConceptPage -----------------------------------------------------
+
+
+def test_concept_page_round_trip() -> None:
+    original = ConceptPage(
+        learner_id="test-learner",
+        concept_id="civil_war",
+        compiled_truth="Student confident on causes, shaky on outcomes.",
+    )
+    rendered = original.render()
+    assert "concept_id: civil_war" in rendered
+    parsed = ConceptPage.parse(rendered)
+    assert parsed.learner_id == "test-learner"
+    assert parsed.concept_id == "civil_war"
+
+
+# -- SessionPage -----------------------------------------------------
+
+
+def test_session_page_round_trip() -> None:
+    original = SessionPage(
+        session_id="sess-001",
+        learner_id="test-learner",
+        compiled_truth="Covered Reconstruction; 2 blocks; 0 reteaches.",
+    )
+    parsed = SessionPage.parse(original.render())
+    assert parsed.session_id == "sess-001"
+    assert parsed.learner_id == "test-learner"
+
+
+# -- SourcePage ------------------------------------------------------
+
+
+def test_source_page_round_trip_with_all_fields() -> None:
+    original = SourcePage(
+        source_id="emancipation-proclamation",
+        title="Emancipation Proclamation",
+        attribution="Abraham Lincoln, 1863",
+        age_bracket="late_high",
+        compiled_truth="Primary source. Use for causation discussion.",
+    )
+    rendered = original.render()
+    assert "title: Emancipation Proclamation" in rendered
+    assert "attribution: Abraham Lincoln, 1863" in rendered
+    parsed = SourcePage.parse(rendered)
+    assert parsed.source_id == "emancipation-proclamation"
+    assert parsed.title == "Emancipation Proclamation"
+    assert parsed.attribution == "Abraham Lincoln, 1863"
+    assert parsed.age_bracket == "late_high"
+
+
+# -- MisconceptionPage -----------------------------------------------
+
+
+def test_misconception_page_round_trip_preserves_occurrences() -> None:
+    original = MisconceptionPage(
+        learner_id="test-learner",
+        misconception_id="civil_war_states_rights",
+        concept_id="civil_war",
+        occurrences=3,
+        compiled_truth="Student believes the war was fought over states' rights alone.",
+    )
+    parsed = MisconceptionPage.parse(original.render())
+    assert parsed.occurrences == 3
+    assert parsed.misconception_id == "civil_war_states_rights"
+    assert parsed.concept_id == "civil_war"
+
+
+# -- TopicPage -------------------------------------------------------
+
+
+def test_topic_page_round_trip() -> None:
+    original = TopicPage(
+        learner_id="test-learner",
+        topic_id="reform_movements",
+        compiled_truth="Groups abolition, suffrage, labor, temperance.",
+    )
+    parsed = TopicPage.parse(original.render())
+    assert parsed.topic_id == "reform_movements"
+    assert parsed.learner_id == "test-learner"
+
+
+# -- Cross-type kind enforcement --------------------------------------
+
+
+def test_every_page_type_enforces_its_kind_on_parse() -> None:
+    learner = LearnerPage(learner_id="l1", compiled_truth="x")
+    concept = ConceptPage(learner_id="l1", concept_id="c1", compiled_truth="x")
+    session = SessionPage(
+        session_id="s1", learner_id="l1", compiled_truth="x"
+    )
+
+    with pytest.raises(ValueError, match="expected kind=concept"):
+        ConceptPage.parse(learner.render())
+    with pytest.raises(ValueError, match="expected kind=session"):
+        SessionPage.parse(concept.render())
+    with pytest.raises(ValueError, match="expected kind=learner"):
+        LearnerPage.parse(session.render())
