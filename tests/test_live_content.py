@@ -11,8 +11,8 @@ from __future__ import annotations
 import pytest
 
 from clawstu.assessment.generator import AssessmentType
-from clawstu.curriculum.live_generator import LiveContentGenerator
 from clawstu.curriculum.topic import Topic
+from clawstu.orchestrator.live_content import LiveContentGenerator
 from clawstu.profile.model import AgeBracket, ComplexityTier, Domain, Modality
 from tests.conftest import async_router_for_testing
 
