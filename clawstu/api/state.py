@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from threading import RLock
 
 from clawstu.engagement.session import Session, SessionRunner
+from clawstu.memory.store import BrainStore
 from clawstu.persistence.store import (
     AbstractPersistentStore,
     InMemoryPersistentStore,
@@ -73,6 +74,7 @@ class AppState:
         *,
         cache_size: int | None = None,
         runner: SessionRunner | None = None,
+        brain_store: BrainStore | None = None,
     ) -> None:
         self._persistence: AbstractPersistentStore = (
             persistence if persistence is not None else InMemoryPersistentStore()
@@ -84,6 +86,10 @@ class AppState:
         self._cache_size = cache_size
         self._lock = RLock()
         self.runner: SessionRunner = runner or SessionRunner()
+        # Phase 5: optional brain store for post-session memory writes.
+        # Default is None so the 282 pre-Phase-5 tests that construct
+        # `AppState()` without a brain store get a no-op on close.
+        self._brain_store: BrainStore | None = brain_store
 
     # -- Read-only views ------------------------------------------------
 
@@ -97,6 +103,17 @@ class AppState:
         """
         with self._lock:
             return dict(self._cache)
+
+    @property
+    def brain_store(self) -> BrainStore | None:
+        """Return the configured brain store, or None if not wired."""
+        return self._brain_store
+
+    @property
+    def persistence(self) -> AbstractPersistentStore:
+        """Expose the persistence store so higher layers (e.g. the
+        session-close handler) can reach the knowledge-graph sub-store."""
+        return self._persistence
 
     # -- Mutators -------------------------------------------------------
 

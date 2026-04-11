@@ -29,7 +29,8 @@ from clawstu.api.state import AppState, SessionBundle, get_state
 from clawstu.assessment.evaluator import EvaluationResult, Evaluator
 from clawstu.assessment.generator import AssessmentItem
 from clawstu.engagement.session import Session, SessionDirective, SessionPhase
-from clawstu.profile.model import Domain
+from clawstu.memory.writer import SessionSnapshot, write_session_to_memory
+from clawstu.profile.model import Domain, EventKind, LearnerProfile
 from clawstu.safety.boundaries import BoundaryEnforcer
 from clawstu.safety.escalation import EscalationHandler
 from clawstu.safety.gate import InboundDecision, InboundSafetyGate
@@ -320,6 +321,53 @@ def socratic(
     )
 
 
+def _adapt_session_for_memory(
+    session: Session,
+    profile: LearnerProfile,
+    summary: str,
+) -> SessionSnapshot:
+    """Build a memory-layer `SessionSnapshot` from a finished session.
+
+    The memory layer must not import from engagement (layer DAG), so
+    the adapter lives here in the API layer. Concepts touched come
+    from the pathway up to its current position; wrong-answer
+    concepts are harvested from the profile's CHECK_FOR_UNDERSTANDING
+    events for this session's domain where `correct=False`.
+    """
+    concepts_touched: tuple[str, ...] = ()
+    if session.pathway is not None:
+        # Positions 0..current are concepts that have been seen.
+        position = session.pathway.position
+        covered = session.pathway.concepts[: max(0, min(position + 1, len(session.pathway.concepts)))]
+        # De-duplicate while preserving order.
+        seen: list[str] = []
+        for concept in covered:
+            if concept not in seen:
+                seen.append(concept)
+        concepts_touched = tuple(seen)
+
+    wrong_concepts: list[str] = []
+    for event in profile.events:
+        if (
+            event.kind is EventKind.CHECK_FOR_UNDERSTANDING
+            and event.domain is session.domain
+            and event.concept
+            and event.correct is False
+            and event.concept not in wrong_concepts
+        ):
+            wrong_concepts.append(event.concept)
+
+    return SessionSnapshot(
+        session_id=session.id,
+        learner_id=session.learner_id,
+        concepts_touched=concepts_touched,
+        wrong_answer_concepts=tuple(wrong_concepts),
+        blocks_presented=session.blocks_presented,
+        reteach_count=session.reteach_count,
+        summary=summary,
+    )
+
+
 @router.post("/{session_id}/close", response_model=CloseResponse)
 def close_session(
     session_id: str,
@@ -327,4 +375,21 @@ def close_session(
 ) -> CloseResponse:
     bundle = _bundle(state, session_id)
     summary = state.runner.close(bundle.profile, bundle.session)
+    # Phase 5: if the app state has a brain store wired, mint the
+    # post-session pages (learner + concept + session + misconception)
+    # and emit KG triples. Best-effort: a brain-store failure must not
+    # break the HTTP response — this is session hygiene, not a critical
+    # path. We checkpoint first so the session-close event is durable
+    # regardless of the memory write outcome.
+    state.checkpoint(session_id)
+    if state.brain_store is not None:
+        snapshot = _adapt_session_for_memory(
+            bundle.session, bundle.profile, summary
+        )
+        write_session_to_memory(
+            profile=bundle.profile,
+            snapshot=snapshot,
+            brain_store=state.brain_store,
+            kg_store=state.persistence.kg,
+        )
     return CloseResponse(summary=summary)
