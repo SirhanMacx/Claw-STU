@@ -8,12 +8,19 @@ from clawstu.engagement.session import Session, SessionRunner
 from clawstu.orchestrator.config import AppConfig
 from clawstu.orchestrator.providers import EchoProvider, LLMProvider
 from clawstu.orchestrator.router import ModelRouter
+from clawstu.persistence.store import InMemoryPersistentStore
 from clawstu.profile.model import Domain, LearnerProfile
 
 
 @pytest.fixture
 def runner() -> SessionRunner:
     return SessionRunner()
+
+
+@pytest.fixture
+def in_memory_store() -> InMemoryPersistentStore:
+    """Fresh dict-backed persistent store for tests that need one."""
+    return InMemoryPersistentStore()
 
 
 @pytest.fixture
