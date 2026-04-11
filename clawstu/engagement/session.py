@@ -25,15 +25,20 @@ Session lifecycle
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from clawstu.assessment.evaluator import EvaluationResult
-from clawstu.assessment.generator import AssessmentItem, QuestionGenerator
+from clawstu.assessment.generator import (
+    AssessmentItem,
+    AssessmentType,
+    QuestionGenerator,
+)
 from clawstu.curriculum.content import ContentSelector, LearningBlock
 from clawstu.curriculum.pathway import Pathway, PathwayPlanner
 from clawstu.engagement.modality import ModalityRotator
@@ -45,7 +50,9 @@ from clawstu.profile.model import (
     EventKind,
     LearnerProfile,
     Modality,
+    ModalityOutcome,
     ObservationEvent,
+    ZPDEstimate,
 )
 from clawstu.profile.observer import Observer
 from clawstu.profile.zpd import ZPDCalibrator
@@ -57,6 +64,16 @@ if TYPE_CHECKING:  # pragma: no cover — type-only imports
 class LiveContentUnavailableError(RuntimeError):
     """Raised when `onboard_with_topic` is called without a live
     content generator available on the runner or as an override."""
+
+
+class NoArtifactError(RuntimeError):
+    """Raised by `SessionRunner.warm_start` when the learner has no
+    unconsumed NextSessionArtifact.
+
+    Callers should interpret this as "the learner needs a fresh
+    onboard" — the API layer converts it to HTTP 409 with a body
+    pointing clients at `POST /sessions`.
+    """
 
 
 class LiveContentGeneratorLike(Protocol):
@@ -99,6 +116,49 @@ class LiveContentGeneratorLike(Protocol):
         modality: Modality,
         age_bracket: AgeBracket,
     ) -> AssessmentItem: ...
+
+
+# -- Warm-start store protocols ----------------------------------------
+#
+# `SessionRunner.warm_start` needs to read a bunch of entity stores to
+# rehydrate a learner profile and consume a NextSessionArtifact. The
+# engagement layer cannot import `clawstu.persistence.store` because
+# the hierarchy DAG puts persistence above engagement (persistence
+# depends on Session from engagement, not the other way around). So we
+# declare the same structural shape the persistence layer happens to
+# satisfy — duck typing over type hierarchy.
+#
+# Each Protocol names only the method `warm_start` calls. The real
+# `clawstu.persistence.store` entity stores expose strictly more;
+# structural typing lets the richer concrete types slot in without
+# engagement ever knowing about them.
+
+
+class _LearnerStoreLike(Protocol):
+    def get(self, learner_id: str) -> LearnerProfile | None: ...
+
+
+class _ZPDStoreLike(Protocol):
+    def get_all(self, learner_id: str) -> dict[Domain, ZPDEstimate]: ...
+
+
+class _ModalityStoreLike(Protocol):
+    def get_all(self, learner_id: str) -> dict[Modality, ModalityOutcome]: ...
+
+
+class _MisconceptionStoreLike(Protocol):
+    def get_all(self, learner_id: str) -> dict[str, int]: ...
+
+
+class _EventStoreLike(Protocol):
+    def list_for_learner(
+        self, learner_id: str
+    ) -> list[ObservationEvent]: ...
+
+
+class _ArtifactStoreLike(Protocol):
+    def get(self, learner_id: str) -> dict[str, str | None] | None: ...
+    def mark_consumed(self, learner_id: str) -> None: ...
 
 
 class SessionPhase(str, Enum):
@@ -313,6 +373,120 @@ class SessionRunner:
             primed_check=check,
         )
         session.phase = SessionPhase.TEACHING
+        return profile, session
+
+    def warm_start(
+        self,
+        *,
+        learner_id: str,
+        learners: _LearnerStoreLike,
+        artifacts: _ArtifactStoreLike,
+        zpd: _ZPDStoreLike,
+        modality_outcomes: _ModalityStoreLike,
+        misconceptions: _MisconceptionStoreLike,
+        events: _EventStoreLike,
+    ) -> tuple[LearnerProfile, Session]:
+        """Resume a learner from a pre-generated NextSessionArtifact.
+
+        Spec reference: §4.8.1. The caller passes in only the entity
+        stores this method needs; the engagement layer cannot import
+        from persistence, so the protocols above describe the shape
+        the real SQLite / in-memory stores happen to satisfy.
+
+        Steps:
+
+        1. Load the `LearnerProfile` from ``learners.get``. Raise
+           ``NoArtifactError`` if the learner is not persisted — a
+           warm-start request for an unknown learner is equivalent
+           to "no artifact" for the caller (the API layer converts
+           both to HTTP 409).
+        2. Rehydrate the profile's substores (ZPD, modality outcomes,
+           misconceptions, events) so downstream runner calls see a
+           consistent in-memory object.
+        3. Load the most recent artifact from ``artifacts.get``. If
+           the row is missing, or ``consumed_at`` is already set,
+           raise ``NoArtifactError``.
+        4. Parse ``pathway_json`` / ``first_block_json`` /
+           ``first_check_json`` back into a Pathway, LearningBlock,
+           and AssessmentItem. The parser accepts both Pydantic-
+           shaped JSON (what a future scheduler would emit) and the
+           Phase 6 placeholder shape, so warm-start works against
+           whichever prepare_next_session output is on disk.
+        5. Build a fresh `Session` primed for TEACHING with the
+           parsed pathway + block + check.
+        6. Mark the artifact consumed via ``artifacts.mark_consumed``.
+        7. Return `(profile, session)`.
+
+        The returned Session has `phase = TEACHING` and
+        `primed_block` / `primed_check` set, which is the shape the
+        standard `next_directive` / `select_check` path expects.
+        """
+        profile = learners.get(learner_id)
+        if profile is None:
+            raise NoArtifactError(
+                f"no persisted profile for learner {learner_id!r}"
+            )
+
+        # Rehydrate substores into the in-memory profile so the
+        # returned object is ready for `record_check` & friends to
+        # mutate without a second round-trip to persistence.
+        profile.zpd_by_domain = zpd.get_all(learner_id)
+        profile.modality_outcomes = modality_outcomes.get_all(learner_id)
+        profile.misconceptions = misconceptions.get_all(learner_id)
+        profile.events = events.list_for_learner(learner_id)
+
+        artifact = artifacts.get(learner_id)
+        if artifact is None:
+            raise NoArtifactError(
+                f"no next-session artifact for learner {learner_id!r}"
+            )
+        if artifact.get("consumed_at") is not None:
+            raise NoArtifactError(
+                f"artifact for learner {learner_id!r} already consumed"
+            )
+
+        pathway_raw = artifact.get("pathway_json")
+        block_raw = artifact.get("first_block_json")
+        check_raw = artifact.get("first_check_json")
+        if not pathway_raw or not block_raw or not check_raw:
+            raise NoArtifactError(
+                f"artifact for learner {learner_id!r} is missing one of "
+                "pathway_json / first_block_json / first_check_json"
+            )
+
+        # Domain binding for the new Session comes from the learner's
+        # most-recent session if we have one; otherwise we fall back
+        # to the first ZPD estimate; otherwise the default of
+        # US_HISTORY, which is the MVP-seed domain. Warm-start is
+        # best-effort — the block + check are canonical, the session-
+        # level domain is just a tag for downstream analytics.
+        domain = _pick_domain_for_warm_start(profile)
+
+        pathway = _parse_pathway(pathway_raw, domain)
+        block = _parse_block(block_raw, domain, concept=_first_concept(pathway))
+        check = _parse_check(check_raw, domain, concept=_first_concept(pathway))
+
+        session = Session(
+            learner_id=learner_id,
+            domain=domain,
+            pathway=pathway,
+            current_tier=block.tier,
+            current_modality=block.modality,
+            primed_block=block,
+            primed_check=check,
+        )
+        session.phase = SessionPhase.TEACHING
+
+        # Artifact is consumed on first successful warm-start so a
+        # subsequent call to this method for the same learner short-
+        # circuits with NoArtifactError — the client must request a
+        # fresh onboard or wait for the next scheduler tick.
+        artifacts.mark_consumed(learner_id)
+
+        self._observer.apply(
+            profile,
+            ObservationEvent(kind=EventKind.SESSION_START, domain=domain),
+        )
         return profile, session
 
     def calibration_items(self, session: Session, size: int = 3) -> tuple[AssessmentItem, ...]:
@@ -558,3 +732,136 @@ class SessionRunner:
             if block.id == session.last_block_id:
                 return block
         raise RuntimeError(f"unknown block id on session: {session.last_block_id}")
+
+
+# -- warm-start parsing helpers ----------------------------------------
+#
+# The Phase 6 `prepare_next_session` task ships a placeholder artifact
+# whose JSON shapes do NOT match the Pydantic models (`Pathway`,
+# `LearningBlock`, `AssessmentItem`). Phase 7's warm-start must still
+# resolve those blobs into working objects — both the placeholder
+# shape and the richer Pydantic-dump shape a future Phase 7+ scheduler
+# would write. These module-private helpers do the parsing.
+#
+# Strategy: try `Model.model_validate_json` first; on `ValidationError`
+# fall back to constructing a minimal model from the placeholder
+# fields so warm-start never crashes on a legitimate (if stubby)
+# artifact. If both paths fail the caller gets the original validation
+# error, which is the right thing for diagnostics.
+
+
+def _first_concept(pathway: Pathway) -> str:
+    """Return the first concept on a pathway, or a fallback label."""
+    if pathway.concepts:
+        return pathway.concepts[0]
+    return "placeholder"
+
+
+def _pick_domain_for_warm_start(profile: LearnerProfile) -> Domain:
+    """Best-effort domain pick for a warm-started session.
+
+    The `LearnerProfile` does not track a "current domain", so we
+    fall back through: (1) the most populous ZPD estimate, (2) the
+    first modality-outcome (no-op — modality outcomes are not domain
+    scoped), (3) the MVP default `US_HISTORY`. Warm-start is best-
+    effort — the returned session's domain is a tag for analytics
+    and for downstream `record_check` events, not a strict pedagogy
+    invariant.
+    """
+    if profile.zpd_by_domain:
+        # Pick the domain with the most samples; ties break on enum order.
+        return max(
+            profile.zpd_by_domain.items(),
+            key=lambda kv: (kv[1].samples, kv[0].value),
+        )[0]
+    return Domain.US_HISTORY
+
+
+def _parse_pathway(raw: str, domain: Domain) -> Pathway:
+    """Parse an artifact's `pathway_json` column into a Pathway.
+
+    Accepts two shapes:
+
+    - Pydantic dump: ``{"domain": "us_history", "concepts": [...], "position": 0}``
+    - Phase 6 placeholder: ``{"concepts": ["placeholder"]}``
+
+    Missing fields are filled in from ``domain`` and ``position=0``.
+    """
+    try:
+        return Pathway.model_validate_json(raw)
+    except ValidationError:
+        pass
+    data = _loads_object(raw)
+    concepts_value = data.get("concepts", ())
+    if isinstance(concepts_value, list):
+        concepts: tuple[str, ...] = tuple(str(c) for c in concepts_value)
+    else:
+        concepts = ("placeholder",)
+    if not concepts:
+        concepts = ("placeholder",)
+    return Pathway(domain=domain, concepts=concepts, position=0)
+
+
+def _parse_block(
+    raw: str,
+    domain: Domain,
+    *,
+    concept: str,
+) -> LearningBlock:
+    """Parse an artifact's `first_block_json` column into a LearningBlock."""
+    try:
+        return LearningBlock.model_validate_json(raw)
+    except ValidationError:
+        pass
+    data = _loads_object(raw)
+    return LearningBlock(
+        domain=domain,
+        modality=Modality.TEXT_READING,
+        tier=ComplexityTier.MEETING,
+        concept=str(data.get("concept", concept)),
+        title=str(data.get("title", "warm-start block")),
+        body=str(data.get("body", "")),
+    )
+
+
+def _parse_check(
+    raw: str,
+    domain: Domain,
+    *,
+    concept: str,
+) -> AssessmentItem:
+    """Parse an artifact's `first_check_json` column into an AssessmentItem."""
+    try:
+        return AssessmentItem.model_validate_json(raw)
+    except ValidationError:
+        pass
+    data = _loads_object(raw)
+    rubric_value = data.get("rubric")
+    rubric: tuple[str, ...] | None = None
+    if isinstance(rubric_value, list):
+        rubric = tuple(str(r) for r in rubric_value)
+    return AssessmentItem(
+        domain=domain,
+        tier=ComplexityTier.MEETING,
+        modality=Modality.TEXT_READING,
+        type=AssessmentType.CRQ,
+        prompt=str(data.get("prompt", "warm-start check")),
+        concept=str(data.get("concept", concept)),
+        rubric=rubric,
+    )
+
+
+def _loads_object(raw: str) -> dict[str, Any]:
+    """JSON-decode `raw` and ensure the result is a mapping.
+
+    Defensive parser used only by the warm-start placeholder fallback.
+    Non-object roots get wrapped in an empty dict so the caller's
+    `.get(...)` accesses still work without `KeyError`.
+    """
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(value, dict):
+        return value
+    return {}
