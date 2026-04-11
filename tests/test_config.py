@@ -68,3 +68,62 @@ def test_default_task_routing_matches_spec_table() -> None:
     # Model names per §4.2.4:
     assert cfg.task_routing[TaskKind.RUBRIC_EVALUATION].model == "claude-haiku-4-5"
     assert cfg.task_routing[TaskKind.BLOCK_GENERATION].model == "z-ai/glm-4.5-air"
+
+
+def test_load_config_reads_env_var_api_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Env var keys populate AppConfig.
+
+    Isolation note: we point CLAW_STU_DATA_DIR at tmp_path so this
+    test does not accidentally read a real ~/.claw-stu/secrets.json
+    when Task 7 adds file-based loading. Without this isolation, the
+    test's result would depend on whatever is in the executor's home
+    directory, which is neither deterministic nor safe.
+    """
+    from clawstu.orchestrator.config import load_config
+
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-abc")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-def")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-ghi")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:22222")
+
+    cfg = load_config()
+    assert cfg.anthropic_api_key == "sk-ant-test-abc"
+    assert cfg.openai_api_key == "sk-test-def"
+    assert cfg.openrouter_api_key == "sk-or-test-ghi"
+    assert cfg.ollama_base_url == "http://localhost:22222"
+
+
+def test_load_config_falls_back_to_defaults_without_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from clawstu.orchestrator.config import load_config
+
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "OLLAMA_API_KEY",
+        "OLLAMA_BASE_URL",
+        "CLAW_STU_DATA_DIR",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+
+    cfg = load_config()
+    assert cfg.anthropic_api_key is None
+    assert cfg.openai_api_key is None
+    assert cfg.openrouter_api_key is None
+    assert cfg.data_dir == tmp_path
+
+
+def test_load_config_respects_claw_stu_data_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from clawstu.orchestrator.config import load_config
+
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path / "custom"))
+    cfg = load_config()
+    assert cfg.data_dir == tmp_path / "custom"

@@ -14,6 +14,7 @@ ships only the data model and the default-routing helper.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -111,3 +112,47 @@ class AppConfig(BaseModel):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Session-layer settings.
     session_cache_size: int = 1024
+
+
+def load_config() -> AppConfig:
+    """Load configuration from env -> file -> defaults (in priority order).
+
+    Env var names:
+      CLAW_STU_DATA_DIR            -> data_dir
+      OLLAMA_BASE_URL              -> ollama_base_url
+      OLLAMA_API_KEY               -> ollama_api_key
+      ANTHROPIC_API_KEY            -> anthropic_api_key
+      ANTHROPIC_BASE_URL           -> anthropic_base_url
+      OPENAI_API_KEY               -> openai_api_key
+      OPENAI_BASE_URL              -> openai_base_url
+      OPENROUTER_API_KEY           -> openrouter_api_key
+      OPENROUTER_BASE_URL          -> openrouter_base_url
+      STU_PRIMARY_PROVIDER         -> primary_provider
+
+    File support lands in Task 7.
+    """
+    overrides: dict[str, object] = {}
+    _apply_env_overrides(overrides)
+    return AppConfig(**overrides)
+
+
+def _apply_env_overrides(overrides: dict[str, object]) -> None:
+    env_map: dict[str, str] = {
+        "OLLAMA_BASE_URL": "ollama_base_url",
+        "OLLAMA_API_KEY": "ollama_api_key",
+        "ANTHROPIC_API_KEY": "anthropic_api_key",
+        "ANTHROPIC_BASE_URL": "anthropic_base_url",
+        "OPENAI_API_KEY": "openai_api_key",
+        "OPENAI_BASE_URL": "openai_base_url",
+        "OPENROUTER_API_KEY": "openrouter_api_key",
+        "OPENROUTER_BASE_URL": "openrouter_base_url",
+        "STU_PRIMARY_PROVIDER": "primary_provider",
+    }
+    for env_name, field_name in env_map.items():
+        value = os.environ.get(env_name)
+        if value is not None:
+            overrides[field_name] = value
+
+    data_dir = os.environ.get("CLAW_STU_DATA_DIR")
+    if data_dir:
+        overrides["data_dir"] = Path(data_dir)
