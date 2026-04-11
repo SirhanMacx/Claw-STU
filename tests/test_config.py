@@ -352,3 +352,32 @@ def test_ensure_data_dir_is_idempotent(
     ensure_data_dir(cfg)
     ensure_data_dir(cfg)  # second call must not raise
     assert cfg.data_dir.exists()
+
+
+def test_ensure_data_dir_preserves_existing_wider_perms(
+    tmp_path: Path,
+) -> None:
+    """A pre-existing directory's permissions must NOT be rewritten.
+
+    Someone deploying Claw-STU on a shared-family-machine may
+    intentionally set ~/.claw-stu to 0750 so a guardian account in
+    the same group can read the learner profile. If Stuart stomped
+    0700 on every startup, that configuration would silently break.
+    The early-exit guard in ensure_data_dir must preserve whatever
+    mode the directory already has.
+    """
+    if os.name == "nt":
+        pytest.skip("POSIX-only perms test")
+    from clawstu.orchestrator.config import AppConfig, ensure_data_dir
+
+    target = tmp_path / "preexisting"
+    target.mkdir(mode=0o755)
+    target.chmod(0o755)  # defeat umask on systems with restrictive default
+
+    cfg = AppConfig(data_dir=target)
+    ensure_data_dir(cfg)
+
+    file_mode = stat.S_IMODE(target.stat().st_mode)
+    assert file_mode == 0o755, (
+        f"pre-existing dir perms were rewritten: expected 0755, got {file_mode:o}"
+    )
