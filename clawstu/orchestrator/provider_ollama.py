@@ -30,15 +30,15 @@ class OllamaProvider:
         *,
         base_url: str = "http://localhost:11434",
         api_key: str | None = None,
-        client: httpx.Client | None = None,
+        client: httpx.AsyncClient | None = None,
         timeout: float = 60.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = timeout
-        self._client = client or httpx.Client(timeout=timeout)
+        self._client = client or httpx.AsyncClient(timeout=timeout)
 
-    def complete(
+    async def complete(
         self,
         *,
         system: str,
@@ -56,7 +56,7 @@ class OllamaProvider:
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        body = self._post(payload)
+        body = await self._post(payload)
         return self._parse_body(body, model=effective_model)
 
     def _build_payload(
@@ -83,7 +83,7 @@ class OllamaProvider:
             },
         }
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST the payload and return the parsed JSON body.
 
         Raises ProviderError on network failure, non-2xx status, or
@@ -94,7 +94,7 @@ class OllamaProvider:
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         try:
-            http_response = self._client.post(
+            http_response = await self._client.post(
                 f"{self._base_url}/api/chat",
                 json=payload,
                 headers=headers,
