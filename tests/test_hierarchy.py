@@ -17,7 +17,7 @@ Layer dependency table (authoritative for Phase 2 and beyond):
                     curriculum, assessment
     orchestrator    stdlib, pydantic, safety, profile, memory,
                     curriculum, assessment
-    persistence     stdlib, pydantic
+    persistence     stdlib, pydantic, profile, engagement
     api             any of the above
     scheduler       stdlib, pydantic, orchestrator, memory,
                     persistence, engagement
@@ -68,7 +68,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
     "orchestrator": frozenset(
         {"safety", "profile", "memory", "curriculum", "assessment"}
     ),
-    "persistence": frozenset(),
+    "persistence": frozenset({"profile", "engagement"}),
     "api": frozenset(
         {
             "safety",
