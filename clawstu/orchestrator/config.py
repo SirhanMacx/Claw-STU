@@ -14,12 +14,17 @@ ships only the data model and the default-routing helper.
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
+import stat
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from clawstu.orchestrator.task_kinds import TaskKind
+
+logger = logging.getLogger(__name__)
 
 
 class TaskRoute(BaseModel):
@@ -115,7 +120,17 @@ class AppConfig(BaseModel):
 
 
 def load_config() -> AppConfig:
-    """Load configuration from env -> file -> defaults (in priority order).
+    """Load configuration from env > file > defaults (priority order).
+
+    1. Start with defaults from AppConfig's field defaults.
+    2. Overlay values from ~/.claw-stu/secrets.json if it exists.
+    3. Overlay env var values (highest priority).
+    4. Construct AppConfig and return.
+
+    Rationale for env-over-file: a developer setting ANTHROPIC_API_KEY
+    in their shell should always win over whatever is in the file,
+    even if they forget to clear it. File-over-env would produce
+    surprising results.
 
     Env var names:
       CLAW_STU_DATA_DIR            -> data_dir
@@ -128,15 +143,76 @@ def load_config() -> AppConfig:
       OPENROUTER_API_KEY           -> openrouter_api_key
       OPENROUTER_BASE_URL          -> openrouter_base_url
       STU_PRIMARY_PROVIDER         -> primary_provider
-
-    File support lands in Task 7.
     """
     overrides: dict[str, object] = {}
+    _apply_file_overrides(overrides)
     _apply_env_overrides(overrides)
     # `model_validate` accepts dict[str, Any] and keeps pydantic's own field
     # validation without forcing mypy --strict to reconcile a `**dict[str,
     # object]` spread against the per-field signature of BaseModel.__init__.
     return AppConfig.model_validate(overrides)
+
+
+def _apply_file_overrides(overrides: dict[str, object]) -> None:
+    """Mutate `overrides` with values from ~/.claw-stu/secrets.json.
+
+    CLAW_STU_DATA_DIR is consulted here (not just in `_apply_env_overrides`)
+    so test suites and relocated installs can redirect the file lookup
+    without clobbering the final `data_dir` field. If the file does not
+    exist, that is fine — fresh installs and `STU_*_API_KEY`-only setups
+    never need it. A malformed JSON body raises ValueError with the path
+    embedded so the operator can fix it in place.
+    """
+    data_dir_env = os.environ.get("CLAW_STU_DATA_DIR")
+    data_dir = Path(data_dir_env) if data_dir_env else Path.home() / ".claw-stu"
+    secrets_path = data_dir / "secrets.json"
+    if not secrets_path.exists():
+        logger.debug("no secrets.json at %s", secrets_path)
+        return
+    _check_secrets_permissions(secrets_path)
+    try:
+        payload = json.loads(secrets_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"secrets.json at {secrets_path} is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"secrets.json at {secrets_path} must be a JSON object, "
+            f"got {type(payload).__name__}"
+        )
+    for key, value in payload.items():
+        overrides[key] = value
+
+
+def _check_secrets_permissions(secrets_path: Path) -> None:
+    """WARN if secrets.json is not 0600 on POSIX. No-op on Windows.
+
+    A hard fail would lock users out. A WARN gives them a chance to fix
+    the permissions without downtime.
+    """
+    if os.name == "nt":
+        logger.debug(
+            "Windows detected; skipping POSIX permission check on %s. "
+            "Treat ~/.claw-stu/ as sensitive and protect it via NTFS ACLs "
+            "or a user-only profile location.",
+            secrets_path,
+        )
+        return
+    try:
+        mode = secrets_path.stat().st_mode
+    except OSError as exc:
+        logger.warning("could not stat %s: %s", secrets_path, exc)
+        return
+    file_mode = stat.S_IMODE(mode)
+    if file_mode != 0o600:
+        logger.warning(
+            "secrets.json at %s has permissions %o; "
+            "recommended is 0600 (run `chmod 600 %s`)",
+            secrets_path,
+            file_mode,
+            secrets_path,
+        )
 
 
 def _apply_env_overrides(overrides: dict[str, object]) -> None:

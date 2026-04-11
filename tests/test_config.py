@@ -1,6 +1,11 @@
 """Tests for AppConfig, TaskRoute, and load_config."""
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -148,3 +153,112 @@ def test_load_config_respects_claw_stu_data_dir(
     monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path / "custom"))
     cfg = load_config()
     assert cfg.data_dir == tmp_path / "custom"
+
+
+def test_load_config_reads_secrets_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from clawstu.orchestrator.config import load_config
+
+    for key in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+
+    secrets_path = tmp_path / "secrets.json"
+    secrets_path.write_text(json.dumps({
+        "anthropic_api_key": "sk-ant-from-file",
+        "openai_api_key": "sk-openai-from-file",
+    }))
+    if os.name != "nt":
+        secrets_path.chmod(0o600)
+
+    cfg = load_config()
+    assert cfg.anthropic_api_key == "sk-ant-from-file"
+    assert cfg.openai_api_key == "sk-openai-from-file"
+
+
+def test_env_overrides_secrets_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from clawstu.orchestrator.config import load_config
+
+    # Clear the other API key env vars so ambient environment cannot
+    # pollute this test — we only want ANTHROPIC_API_KEY set so the
+    # env-wins assertion is meaningful in isolation.
+    for key in ("OPENAI_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-env")
+
+    secrets_path = tmp_path / "secrets.json"
+    secrets_path.write_text(json.dumps({
+        "anthropic_api_key": "sk-ant-from-file",
+    }))
+    if os.name != "nt":
+        secrets_path.chmod(0o600)
+
+    cfg = load_config()
+    # Env wins.
+    assert cfg.anthropic_api_key == "sk-ant-from-env"
+
+
+def test_load_config_tolerates_missing_secrets_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from clawstu.orchestrator.config import load_config
+
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    for key in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    # No secrets.json created.
+    cfg = load_config()
+    assert cfg.anthropic_api_key is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX perms only")
+def test_load_config_warns_on_non_0600_secrets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    from clawstu.orchestrator.config import load_config
+
+    # Ambient env may have ANTHROPIC_API_KEY set (even to an empty string,
+    # which Task 6 documents as a valid "explicit emptiness" signal).
+    # Delete it so the file value is the only source for that field and
+    # the assertion below is a real test of the permissions path, not of
+    # env-over-file precedence.
+    for key in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    secrets_path = tmp_path / "secrets.json"
+    secrets_path.write_text(json.dumps({"anthropic_api_key": "sk-ant-whatever"}))
+    secrets_path.chmod(0o644)  # too open
+
+    with caplog.at_level(logging.WARNING, logger="clawstu.orchestrator.config"):
+        cfg = load_config()
+
+    assert cfg.anthropic_api_key == "sk-ant-whatever"
+    assert any("0600" in record.message for record in caplog.records), (
+        f"expected a 0600 warning; got: {[r.message for r in caplog.records]}"
+    )
+
+
+def test_load_config_rejects_malformed_secrets_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from clawstu.orchestrator.config import load_config
+
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    secrets_path = tmp_path / "secrets.json"
+    secrets_path.write_text("{not valid json")
+    if os.name != "nt":
+        secrets_path.chmod(0o600)
+
+    with pytest.raises(ValueError, match=re.escape("secrets.json")):
+        load_config()
