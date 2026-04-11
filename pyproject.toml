@@ -15,12 +15,14 @@ authors = [
 keywords = ["education", "ai", "learning", "adaptive", "zpd", "open-source"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
+    "Framework :: FastAPI",
     "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Education",
+    "Topic :: Education :: Computer Aided Instruction (CAI)",
 ]
 
 dependencies = [
