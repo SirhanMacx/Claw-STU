@@ -1,5 +1,5 @@
 Claw-STU: Vision & Handoff Document
-Author: Jon Maccarello (Crusty Macx)
+Author: SirhanMacx
 Date: April 2026
 Status: Pre-development — Vision & Architecture
 Sister Project: Claw-ED (teacher-facing agent)

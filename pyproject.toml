@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Jon Maccarello", email = "crustymacx@users.noreply.github.com" },
+    { name = "SirhanMacx" },
 ]
 keywords = ["education", "ai", "learning", "adaptive", "zpd", "open-source"]
 classifiers = [

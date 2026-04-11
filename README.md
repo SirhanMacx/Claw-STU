@@ -95,7 +95,6 @@ Pre-alpha. The MVP target is a single adaptive learning session:
 
 MIT — see [`LICENSE`](./LICENSE). Open source by conviction, not convenience.
 
-## Author
+---
 
-Jon Maccarello (Crusty Macx) — nine years teaching Global History I & II and US
-History, grades 8–10.
+*Made by a teacher, for learners. Built by a teacher in New York.*
