@@ -1,6 +1,11 @@
 """Tests for the clawstu CLI entry point."""
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
 from typer.testing import CliRunner
 
 from clawstu.cli import app
@@ -41,3 +46,49 @@ def test_scheduler_run_once_placeholder() -> None:
     result = runner.invoke(app, ["scheduler", "run-once", "--task", "dream_cycle"])
     assert result.exit_code == 0
     assert "dream_cycle" in result.stdout
+
+
+def test_doctor_without_ping_does_not_make_network_calls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """doctor is a static config dump by default; --ping is opt-in.
+
+    We monkeypatch both httpx.Client.post and .get to raise on any
+    invocation, then run `doctor` without --ping. If any code path
+    tries a network call, the test fails with a clear message.
+    """
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+
+    def forbidden_request(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError(
+            "doctor without --ping must not make network calls; "
+            f"attempted: args={args}, kwargs={kwargs}"
+        )
+
+    monkeypatch.setattr(httpx.Client, "post", forbidden_request)
+    monkeypatch.setattr(httpx.Client, "get", forbidden_request)
+
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.stdout
+    # With --ping off, the reachability line says "skipped".
+    assert "skipped" in result.stdout
+
+
+def test_doctor_has_a_ping_flag_in_help() -> None:
+    result = runner.invoke(app, ["doctor", "--help"])
+    assert result.exit_code == 0
+    assert "--ping" in result.stdout
+
+
+def test_doctor_with_ping_prints_deferred_note(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """With --ping, Phase 1 still prints a DEFERRED note (real
+    reachability check lands in Phase 2). This test pins the
+    behavior so anyone who implements real pings has to update it.
+    """
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    result = runner.invoke(app, ["doctor", "--ping"])
+    assert result.exit_code == 0, result.stdout
+    assert "provider reachability" in result.stdout
+    assert "DEFERRED" in result.stdout

@@ -50,8 +50,18 @@ def serve(
 
 
 @app.command()
-def doctor() -> None:
-    """Self-diagnosis: config load, provider connectivity, SQLite, FTS5."""
+def doctor(
+    ping: bool = typer.Option(
+        False,
+        "--ping",
+        help=(
+            "Also attempt a round-trip against every configured provider. "
+            "Without --ping, doctor is a pure static config dump that "
+            "never touches the network."
+        ),
+    ),
+) -> None:
+    """Self-diagnosis: config load, provider reachability, SQLite, FTS5."""
     from clawstu.orchestrator.config import load_config
 
     typer.echo("clawstu doctor — Phase 1 baseline")
@@ -64,7 +74,16 @@ def doctor() -> None:
     typer.echo(f"    data_dir: {cfg.data_dir}")
     typer.echo(f"    primary_provider: {cfg.primary_provider}")
     typer.echo(f"    fallback_chain: {list(cfg.fallback_chain)}")
-    typer.echo("  provider reachability: DEFERRED (Phase 2)")
+
+    if ping:
+        typer.echo("  provider reachability:")
+        typer.secho(
+            "    DEFERRED (Phase 2 wires the router + real connectivity checks)",
+            fg=typer.colors.YELLOW,
+        )
+    else:
+        typer.echo("  provider reachability: skipped (pass --ping to try)")
+
     typer.echo("  sqlite + FTS5: DEFERRED (Phase 3)")
     typer.echo("  embeddings model: DEFERRED (Phase 4)")
 
