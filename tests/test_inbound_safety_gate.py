@@ -81,6 +81,20 @@ class TestInboundSafetyGate:
         assert first.crisis_detection.detected is True
 
 
+class TestGatePropertyAccessors:
+    def test_escalation_property_exposes_handler(self) -> None:
+        escalation = EscalationHandler()
+        boundaries = BoundaryEnforcer()
+        gate = InboundSafetyGate(escalation, boundaries)
+        assert gate.escalation is escalation
+
+    def test_boundaries_property_exposes_enforcer(self) -> None:
+        escalation = EscalationHandler()
+        boundaries = BoundaryEnforcer()
+        gate = InboundSafetyGate(escalation, boundaries)
+        assert gate.boundaries is boundaries
+
+
 class TestInboundDecisionConstructors:
     def test_allow_constructor(self) -> None:
         decision = InboundDecision.allow()
