@@ -1,6 +1,7 @@
 """Tests for the clawstu CLI entry point."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,19 +13,32 @@ from clawstu.cli import app
 
 runner = CliRunner()
 
+# Typer uses rich to render --help with box-drawing characters and
+# ANSI color codes. On CI (no TTY) those codes end up in the captured
+# stdout and can fragment literal substrings like "--ping" across
+# escape sequences, so every test that asserts on --help output
+# strips ANSI first.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _plain(s: str) -> str:
+    return _ANSI_RE.sub("", s)
+
 
 def test_help_mentions_every_command() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     # Every top-level command we register should appear in --help.
+    stdout = _plain(result.stdout)
     for command in ("serve", "doctor", "scheduler", "profile"):
-        assert command in result.stdout, f"--help missing '{command}'"
+        assert command in stdout, f"--help missing '{command}'"
 
 
 def test_help_shows_project_name() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "clawstu" in result.stdout.lower() or "Stuart" in result.stdout
+    stdout = _plain(result.stdout)
+    assert "clawstu" in stdout.lower() or "Stuart" in stdout
 
 
 def test_invoking_with_no_args_shows_help() -> None:
@@ -38,14 +52,15 @@ def test_doctor_prints_config_summary() -> None:
     # doctor should succeed on a clean environment (no secrets.json,
     # no env overrides -> falls back to AppConfig defaults).
     assert result.exit_code == 0, result.stdout
-    assert "config load" in result.stdout
-    assert "primary_provider" in result.stdout
+    stdout = _plain(result.stdout)
+    assert "config load" in stdout
+    assert "primary_provider" in stdout
 
 
 def test_scheduler_run_once_placeholder() -> None:
     result = runner.invoke(app, ["scheduler", "run-once", "--task", "dream_cycle"])
     assert result.exit_code == 0
-    assert "dream_cycle" in result.stdout
+    assert "dream_cycle" in _plain(result.stdout)
 
 
 def test_doctor_without_ping_does_not_make_network_calls(
@@ -71,13 +86,24 @@ def test_doctor_without_ping_does_not_make_network_calls(
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0, result.stdout
     # With --ping off, the reachability line says "skipped".
-    assert "skipped" in result.stdout
+    assert "skipped" in _plain(result.stdout)
 
 
-def test_doctor_has_a_ping_flag_in_help() -> None:
-    result = runner.invoke(app, ["doctor", "--help"])
-    assert result.exit_code == 0
-    assert "--ping" in result.stdout
+def test_doctor_accepts_ping_flag() -> None:
+    """The --ping flag is actually a registered option.
+
+    Behavioral test (not help-text introspection): if --ping were not
+    a real flag, Typer would reject the invocation with exit code 2
+    ("no such option"). Exit code 0 + stdout content is the contract.
+    This is more robust than scraping --help for "--ping" because
+    rich-rendered help output in CI contains ANSI escapes and
+    word-wrapping that can fragment the literal substring.
+    """
+    result = runner.invoke(app, ["doctor", "--ping"])
+    assert result.exit_code == 0, (
+        f"--ping rejected by the CLI: exit={result.exit_code}\n"
+        f"stdout:\n{result.stdout}"
+    )
 
 
 def test_doctor_with_ping_prints_deferred_note(
@@ -90,5 +116,6 @@ def test_doctor_with_ping_prints_deferred_note(
     monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
     result = runner.invoke(app, ["doctor", "--ping"])
     assert result.exit_code == 0, result.stdout
-    assert "provider reachability" in result.stdout
-    assert "DEFERRED" in result.stdout
+    stdout = _plain(result.stdout)
+    assert "provider reachability" in stdout
+    assert "DEFERRED" in stdout
