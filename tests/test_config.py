@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -322,3 +323,32 @@ def test_load_config_priority_chain_env_beats_file_beats_default(
     assert cfg.openai_api_key == "env-openai"  # env (no file entry)
     assert cfg.openrouter_api_key == "file-openrouter"  # file
     assert cfg.ollama_base_url == "http://localhost:11434"  # default
+
+
+def test_ensure_data_dir_creates_with_correct_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from clawstu.orchestrator.config import AppConfig, ensure_data_dir
+
+    target = tmp_path / "fresh"
+    assert not target.exists()
+
+    cfg = AppConfig(data_dir=target)
+    ensure_data_dir(cfg)
+
+    assert target.exists()
+    assert target.is_dir()
+    if os.name != "nt":
+        file_mode = stat.S_IMODE(target.stat().st_mode)
+        assert file_mode == 0o700, f"expected 0700, got {file_mode:o}"
+
+
+def test_ensure_data_dir_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from clawstu.orchestrator.config import AppConfig, ensure_data_dir
+
+    cfg = AppConfig(data_dir=tmp_path / "already-there")
+    ensure_data_dir(cfg)
+    ensure_data_dir(cfg)  # second call must not raise
+    assert cfg.data_dir.exists()

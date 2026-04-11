@@ -247,3 +247,20 @@ def _apply_env_overrides(overrides: dict[str, object]) -> None:
     data_dir = os.environ.get("CLAW_STU_DATA_DIR")
     if data_dir:
         overrides["data_dir"] = Path(data_dir)
+
+
+def ensure_data_dir(cfg: AppConfig) -> None:
+    """Create the data directory if it does not exist. 0700 on POSIX.
+
+    Idempotent: second call is a no-op. Never silently overrides an
+    existing directory's permissions — we only set the mode when we
+    create the directory ourselves.
+    """
+    if cfg.data_dir.exists():
+        return
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        try:
+            cfg.data_dir.chmod(0o700)
+        except OSError as exc:
+            logger.warning("could not chmod %s to 0700: %s", cfg.data_dir, exc)
