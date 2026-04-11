@@ -42,6 +42,8 @@ from clawstu.orchestrator.providers import (
     LLMProvider,
     ProviderError,
 )
+from clawstu.orchestrator.router import ModelRouter
+from clawstu.orchestrator.task_kinds import TaskKind
 from clawstu.profile.model import AgeBracket, ComplexityTier, Domain, Modality
 from clawstu.safety.boundaries import BoundaryEnforcer
 from clawstu.safety.content_filter import ContentDecision, ContentFilter
@@ -190,11 +192,11 @@ class LiveContentGenerator:
 
     def __init__(
         self,
-        provider: LLMProvider,
+        router: ModelRouter,
         *,
         safety: _SafetyGate | None = None,
     ) -> None:
-        self._provider = provider
+        self._router = router
         self._safety = safety or _SafetyGate()
 
     async def generate_pathway(
@@ -205,7 +207,8 @@ class LiveContentGenerator:
         max_concepts: int = 4,
     ) -> tuple[str, ...]:
         """Return an ordered list of concept IDs for the topic."""
-        if isinstance(self._provider, EchoProvider):
+        provider, model = self._router.for_task(TaskKind.PATHWAY_PLANNING)
+        if isinstance(provider, EchoProvider):
             concepts = _offline_pathway(topic)[:max_concepts]
         else:
             user = (
@@ -213,7 +216,12 @@ class LiveContentGenerator:
                 f"Age bracket: {age_bracket.value}\n"
                 f"Maximum concepts: {max_concepts}"
             )
-            payload = await self._ask_json(system=_PATHWAY_SYSTEM, user=user)
+            payload = await self._ask_json(
+                system=_PATHWAY_SYSTEM,
+                user=user,
+                provider=provider,
+                model=model,
+            )
             raw_concepts = payload.get("concepts")
             if not isinstance(raw_concepts, list) or not raw_concepts:
                 raise LiveGenerationError(
@@ -235,7 +243,8 @@ class LiveContentGenerator:
         age_bracket: AgeBracket,
     ) -> LearningBlock:
         """Return a single `LearningBlock` for the given parameters."""
-        if isinstance(self._provider, EchoProvider):
+        provider, model = self._router.for_task(TaskKind.BLOCK_GENERATION)
+        if isinstance(provider, EchoProvider):
             payload = _offline_block(
                 topic=topic, concept=concept, modality=modality, tier=tier
             )
@@ -247,7 +256,12 @@ class LiveContentGenerator:
                 f"Complexity tier: {tier.value}\n"
                 f"Age bracket: {age_bracket.value}"
             )
-            payload = await self._ask_json(system=_BLOCK_SYSTEM, user=user)
+            payload = await self._ask_json(
+                system=_BLOCK_SYSTEM,
+                user=user,
+                provider=provider,
+                model=model,
+            )
 
         title = _require_str(payload, "title")
         body = _require_str(payload, "body")
@@ -279,7 +293,8 @@ class LiveContentGenerator:
         age_bracket: AgeBracket,
     ) -> AssessmentItem:
         """Return an `AssessmentItem` for the given parameters."""
-        if isinstance(self._provider, EchoProvider):
+        provider, model = self._router.for_task(TaskKind.CHECK_GENERATION)
+        if isinstance(provider, EchoProvider):
             payload = _offline_check(concept=concept, tier=tier)
         else:
             user = (
@@ -288,7 +303,12 @@ class LiveContentGenerator:
                 f"Complexity tier: {tier.value}\n"
                 f"Age bracket: {age_bracket.value}"
             )
-            payload = await self._ask_json(system=_CHECK_SYSTEM, user=user)
+            payload = await self._ask_json(
+                system=_CHECK_SYSTEM,
+                user=user,
+                provider=provider,
+                model=model,
+            )
 
         prompt_text = _require_str(payload, "prompt")
         type_value = _require_str(payload, "type")
@@ -346,12 +366,20 @@ class LiveContentGenerator:
 
     # -- internals --------------------------------------------------------
 
-    async def _ask_json(self, *, system: str, user: str) -> dict[str, Any]:
-        """Ask the provider for a JSON object and parse it strictly."""
+    async def _ask_json(
+        self,
+        *,
+        system: str,
+        user: str,
+        provider: LLMProvider,
+        model: str,
+    ) -> dict[str, Any]:
+        """Ask the provided provider for a JSON object and parse it strictly."""
         try:
-            response = await self._provider.complete(
+            response = await provider.complete(
                 system=system,
                 messages=[LLMMessage(role="user", content=user)],
+                model=model,
             )
         except ProviderError as exc:
             raise LiveGenerationError(f"provider failed: {exc}") from exc
