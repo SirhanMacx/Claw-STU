@@ -16,6 +16,7 @@ Routes covered:
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,12 @@ from clawstu.memory.store import BrainStore
 from clawstu.persistence.store import InMemoryPersistentStore
 from clawstu.profile.model import (
     AgeBracket,
+    ComplexityTier,
+    Domain,
+    EventKind,
     LearnerProfile,
+    Modality,
+    ObservationEvent,
 )
 
 
@@ -175,6 +181,37 @@ class TestQueueRoute:
         assert response.status_code == 200
         assert response.json()["pending_artifact"] is True
 
+    def test_queue_counts_stale_concepts_as_pending_reviews(
+        self,
+        wired: tuple[TestClient, AppState, BrainStore],
+    ) -> None:
+        """A concept whose last check-event is > 7 days old counts as
+        a pending review; a fresh one does not."""
+        client, state, _brain = wired
+        _seed_learner(state, "alice")
+        stale = datetime.now(UTC) - timedelta(days=30)
+        fresh = datetime.now(UTC) - timedelta(hours=1)
+        for concept, ts in (
+            ("stale_concept", stale),
+            ("fresh_concept", fresh),
+        ):
+            state.persistence.events.append(
+                ObservationEvent(
+                    kind=EventKind.CHECK_FOR_UNDERSTANDING,
+                    domain=Domain.US_HISTORY,
+                    modality=Modality.TEXT_READING,
+                    tier=ComplexityTier.MEETING,
+                    correct=True,
+                    concept=concept,
+                    timestamp=ts,
+                ),
+                learner_id="alice",
+                session_id=None,
+            )
+        response = client.get("/learners/alice/queue")
+        assert response.status_code == 200
+        assert response.json()["pending_reviews"] == 1
+
 
 class TestCaptureRoute:
     def test_capture_writes_source_and_returns_id(
@@ -232,3 +269,36 @@ class TestCaptureRoute:
         )
         assert response.status_code == 401
         assert response.json() == {"detail": "unauthorized"}
+
+    def test_capture_returns_404_for_unknown_learner(
+        self,
+        wired: tuple[TestClient, AppState, BrainStore],
+    ) -> None:
+        """Unknown learner id → 404 with a clear detail string."""
+        client, _state, _brain = wired
+        response = client.post(
+            "/learners/ghost/capture",
+            json={"title": "Hello", "text": "harmless note"},
+        )
+        assert response.status_code == 404
+        assert "ghost" in response.json()["detail"]
+
+    def test_capture_returns_503_without_brain_store(
+        self,
+    ) -> None:
+        """Capture requires a brain store; 503 if the app has none."""
+        state = AppState()  # no brain store
+        state.persistence.learners.upsert(
+            LearnerProfile(
+                learner_id="alice", age_bracket=AgeBracket.EARLY_HIGH
+            )
+        )
+        app = create_app()
+        app.dependency_overrides[get_state] = lambda: state
+        client = TestClient(app)
+        response = client.post(
+            "/learners/alice/capture",
+            json={"title": "Hello", "text": "note"},
+        )
+        assert response.status_code == 503
+        assert response.json()["detail"] == "brain store not configured"
