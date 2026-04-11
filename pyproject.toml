@@ -93,3 +93,12 @@ strict = true
 warn_unreachable = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
+
+# APScheduler ships without a py.typed marker, so mypy cannot resolve
+# its public API. Rather than sprinkling `# type: ignore[import-untyped]`
+# across clawstu.scheduler.runner, silence it at the module level. The
+# runner exposes a tight typed shell (SchedulerRunner) around the
+# untyped dependency, which is where the real type discipline lives.
+[[tool.mypy.overrides]]
+module = "apscheduler.*"
+ignore_missing_imports = true

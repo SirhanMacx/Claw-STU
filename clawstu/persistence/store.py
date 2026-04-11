@@ -58,6 +58,7 @@ class _SessionStoreProto(Protocol):
     def upsert(self, session: Session) -> None: ...
     def get(self, session_id: str) -> Session | None: ...
     def list_for_learner(self, learner_id: str) -> list[Session]: ...
+    def list_all(self) -> list[Session]: ...
 
 
 class _EventStoreProto(Protocol):
@@ -251,6 +252,20 @@ class SessionStore:
             "SELECT pathway_json FROM sessions WHERE learner_id = ? "
             "AND pathway_json IS NOT NULL ORDER BY started_at ASC",
             (learner_id,),
+        ).fetchall()
+        return [Session.model_validate_json(row[0]) for row in rows]
+
+    def list_all(self) -> list[Session]:
+        """Return every persisted session ordered by `started_at`.
+
+        Used by the Phase 6 `prune_stale` scheduler task to walk the
+        whole session table looking for idle sessions. Not intended
+        for hot-path callers — it scans the full table and does not
+        paginate.
+        """
+        rows = self._conn.execute(
+            "SELECT pathway_json FROM sessions "
+            "WHERE pathway_json IS NOT NULL ORDER BY started_at ASC",
         ).fetchall()
         return [Session.model_validate_json(row[0]) for row in rows]
 
@@ -729,6 +744,16 @@ class _InMemorySessionStore:
             for s in self._rows.values()
             if s.learner_id == learner_id
         ]
+
+    def list_all(self) -> list[Session]:
+        """Return every session ordered by `started_at` (mirrors SQLite)."""
+        return sorted(
+            (
+                Session.model_validate_json(s.model_dump_json())
+                for s in self._rows.values()
+            ),
+            key=lambda s: s.started_at,
+        )
 
 
 class _InMemoryEventStore:

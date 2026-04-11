@@ -19,7 +19,7 @@ Layer dependency table (authoritative for Phase 2 and beyond):
                     curriculum, assessment
     persistence     stdlib, pydantic, profile, engagement
     api             any of the above
-    scheduler       stdlib, pydantic, orchestrator, memory,
+    scheduler       stdlib, pydantic, profile, orchestrator, memory,
                     persistence, engagement
 
 `cli` is an `api`-like top layer and may import from everything.
@@ -43,7 +43,15 @@ Deviations from spec §4.1 prose:
    curriculum" without literally listing assessment — the prose
    wording is incomplete.
 
-Both deviations should be folded back into a future spec erratum.
+3. `scheduler` is allowed to import from `profile`. Rationale: the
+   Phase 6 tasks (`refresh_zpd`, `spaced_review`) need `EventKind`
+   for filtering observation events and `ZPDCalibrator` for the
+   nightly recompute. Both are profile-layer types and every layer
+   scheduler already transitively imports (memory, engagement,
+   persistence, orchestrator) already depends on profile. Adding
+   profile to scheduler's direct-import set doesn't widen the DAG.
+
+All three deviations should be folded back into a future spec erratum.
 This table is the source of truth for Phase 2+.
 """
 from __future__ import annotations
@@ -82,7 +90,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
         }
     ),
     "scheduler": frozenset(
-        {"orchestrator", "memory", "persistence", "engagement"}
+        {"orchestrator", "memory", "persistence", "engagement", "profile"}
     ),
     # cli is effectively api-layer (top); allow everything.
     "_cli": frozenset(
