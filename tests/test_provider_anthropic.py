@@ -1,6 +1,7 @@
 """AnthropicProvider — httpx.MockTransport-based contract tests."""
 from __future__ import annotations
 
+import inspect
 import json
 
 import httpx
@@ -14,11 +15,17 @@ from clawstu.orchestrator.providers import (
 )
 
 
+def test_anthropic_complete_is_async() -> None:
+    assert inspect.iscoroutinefunction(AnthropicProvider.complete), (
+        "AnthropicProvider.complete must be declared `async def` per Phase 2"
+    )
+
+
 def _make_provider(
     transport: httpx.MockTransport,
     api_key: str = "sk-ant-test",
 ) -> AnthropicProvider:
-    client = httpx.Client(transport=transport)
+    client = httpx.AsyncClient(transport=transport)
     return AnthropicProvider(
         api_key=api_key,
         base_url="https://api.anthropic.com",
@@ -26,7 +33,7 @@ def _make_provider(
     )
 
 
-def test_anthropic_happy_path() -> None:
+async def test_anthropic_happy_path() -> None:
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -48,7 +55,7 @@ def test_anthropic_happy_path() -> None:
         )
 
     provider = _make_provider(httpx.MockTransport(handler))
-    response = provider.complete(
+    response = await provider.complete(
         system="You are Stuart.",
         messages=[LLMMessage(role="user", content="Hello?")],
         max_tokens=256,
@@ -79,7 +86,7 @@ def test_anthropic_missing_api_key_raises() -> None:
         AnthropicProvider(api_key="")
 
 
-def test_anthropic_401_raises_provider_error() -> None:
+async def test_anthropic_401_raises_provider_error() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             401,
@@ -88,13 +95,13 @@ def test_anthropic_401_raises_provider_error() -> None:
 
     provider = _make_provider(httpx.MockTransport(handler))
     with pytest.raises(ProviderError, match="HTTP 401"):
-        provider.complete(
+        await provider.complete(
             system="sys",
             messages=[LLMMessage(role="user", content="hi")],
         )
 
 
-def test_anthropic_extracts_first_text_block() -> None:
+async def test_anthropic_extracts_first_text_block() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -111,7 +118,7 @@ def test_anthropic_extracts_first_text_block() -> None:
         )
 
     provider = _make_provider(httpx.MockTransport(handler))
-    response = provider.complete(
+    response = await provider.complete(
         system="sys",
         messages=[LLMMessage(role="user", content="hi")],
     )
@@ -120,7 +127,7 @@ def test_anthropic_extracts_first_text_block() -> None:
     assert response.text == "first\nsecond"
 
 
-def test_anthropic_empty_content_raises_provider_error() -> None:
+async def test_anthropic_empty_content_raises_provider_error() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -134,7 +141,7 @@ def test_anthropic_empty_content_raises_provider_error() -> None:
 
     provider = _make_provider(httpx.MockTransport(handler))
     with pytest.raises(ProviderError, match="no text"):
-        provider.complete(
+        await provider.complete(
             system="sys",
             messages=[LLMMessage(role="user", content="hi")],
         )

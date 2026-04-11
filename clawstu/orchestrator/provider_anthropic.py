@@ -32,7 +32,7 @@ class AnthropicProvider:
         *,
         api_key: str | None,
         base_url: str = "https://api.anthropic.com",
-        client: httpx.Client | None = None,
+        client: httpx.AsyncClient | None = None,
         timeout: float = 60.0,
     ) -> None:
         if not api_key:
@@ -40,9 +40,9 @@ class AnthropicProvider:
         self._api_key: str = api_key
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        self._client = client or httpx.Client(timeout=timeout)
+        self._client = client or httpx.AsyncClient(timeout=timeout)
 
-    def complete(
+    async def complete(
         self,
         *,
         system: str,
@@ -60,7 +60,7 @@ class AnthropicProvider:
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        body = self._post(payload)
+        body = await self._post(payload)
         return self._parse_body(body, model=effective_model)
 
     def _build_payload(
@@ -82,7 +82,7 @@ class AnthropicProvider:
             "temperature": temperature,
         }
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST the payload and return the parsed JSON body.
 
         Raises ProviderError on network failure, non-2xx status, or
@@ -95,7 +95,7 @@ class AnthropicProvider:
             "anthropic-version": _ANTHROPIC_API_VERSION,
         }
         try:
-            http_response = self._client.post(
+            http_response = await self._client.post(
                 f"{self._base_url}/v1/messages",
                 json=payload,
                 headers=headers,
