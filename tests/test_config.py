@@ -262,3 +262,63 @@ def test_load_config_rejects_malformed_secrets_json(
 
     with pytest.raises(ValueError, match=re.escape("secrets.json")):
         load_config()
+
+
+def test_load_config_rejects_typo_in_secrets_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A typo'd key in secrets.json must loud-fail, not silently no-op.
+
+    Pydantic v2 defaults to silently ignoring unknown keys in
+    model_validate, which would turn `anthropic_apii_key` (double-i
+    typo) into a mystifying None instead of a clear error. AppConfig
+    uses `extra="forbid"` to flip this behavior so the operator sees
+    the typo immediately.
+    """
+    from clawstu.orchestrator.config import load_config
+
+    for key in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    secrets_path = tmp_path / "secrets.json"
+    secrets_path.write_text(json.dumps({"anthropic_apii_key": "sk-typo"}))
+    if os.name != "nt":
+        secrets_path.chmod(0o600)
+
+    with pytest.raises(ValidationError, match="anthropic_apii_key"):
+        load_config()
+
+
+def test_load_config_priority_chain_env_beats_file_beats_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Three-way priority chain: env > file > AppConfig default.
+
+    - `openai_api_key`: only env set -> env value wins
+    - `anthropic_api_key`: env + file set -> env wins
+    - `openrouter_api_key`: only file set -> file wins
+    - `ollama_base_url`: neither set -> default wins
+    """
+    from clawstu.orchestrator.config import load_config
+
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-anthropic")
+    monkeypatch.setenv("OPENAI_API_KEY", "env-openai")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+
+    secrets_path = tmp_path / "secrets.json"
+    secrets_path.write_text(json.dumps({
+        "anthropic_api_key": "file-anthropic",  # env wins over file
+        "openrouter_api_key": "file-openrouter",  # file wins over default
+    }))
+    if os.name != "nt":
+        secrets_path.chmod(0o600)
+
+    cfg = load_config()
+    assert cfg.anthropic_api_key == "env-anthropic"  # env
+    assert cfg.openai_api_key == "env-openai"  # env (no file entry)
+    assert cfg.openrouter_api_key == "file-openrouter"  # file
+    assert cfg.ollama_base_url == "http://localhost:11434"  # default

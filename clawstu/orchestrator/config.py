@@ -90,7 +90,11 @@ class AppConfig(BaseModel):
     is a hard error raised by the router at construction time (Phase 2).
     """
 
-    model_config = ConfigDict(validate_assignment=True)
+    # `extra="forbid"` turns a typo in secrets.json or a CLAW_STU_* env
+    # var into a loud pydantic ValidationError at load_config time,
+    # instead of pydantic's default behavior (silently ignore unknown
+    # keys) which would leave the user debugging a typo for an hour.
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     data_dir: Path = Field(
         default_factory=lambda: Path.home() / ".claw-stu",
