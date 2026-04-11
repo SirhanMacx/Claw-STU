@@ -22,7 +22,10 @@ def test_task_route_is_frozen() -> None:
 def test_task_route_defaults() -> None:
     route = TaskRoute(provider="ollama", model="llama3.2")
     assert route.max_tokens == 1024
-    assert 0.0 <= route.temperature <= 1.0
+    # Pin the actual shipped default rather than a loose range: the
+    # validator allows up to 2.0, so a range check here would let a
+    # future bump to 1.5 silently slip through.
+    assert route.temperature == 0.2
 
 
 def test_app_config_has_defaults_for_every_task_kind() -> None:
