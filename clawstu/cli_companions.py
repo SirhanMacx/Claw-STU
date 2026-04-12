@@ -662,7 +662,7 @@ def _iter_learner_ids(
 # ---------------------------------------------------------------------------
 
 _EXPORT_SCHEMA_VERSION = 1
-_CLAWSTU_VERSION = "0.2.0"
+_CLAWSTU_VERSION = "0.2.1"
 
 
 def run_profile_export(
