@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from starlette.staticfiles import StaticFiles
 
@@ -178,7 +178,7 @@ def create_app() -> FastAPI:
         index = _STATIC_DIR / "index.html"
         return index.read_text(encoding="utf-8")
 
-    # ── Root-level /health alias ─────────────��─────────────────────
+    # ── Root-level /health alias ─────────────────────────────────────
     # README promises ``GET /health``; the canonical endpoint lives at
     # ``/admin/health``. This alias keeps both paths valid.
     @app.get("/health", response_model=admin.HealthResponse)
@@ -186,6 +186,180 @@ def create_app() -> FastAPI:
         state: AppState = Depends(get_state),
     ) -> admin.HealthResponse:
         return admin.health(state)
+
+    # ── WebSocket live sessions ───────────────────────────────────────
+    @app.websocket("/ws/chat")
+    async def websocket_chat(websocket: WebSocket) -> None:
+        """Full session lifecycle over a single WebSocket connection.
+
+        Protocol (JSON):
+        Client -> Server:
+          {"type": "onboard", "name": "...", "age": N, "topic": "..."}
+          {"type": "answer", "text": "..."}
+          {"type": "ready"}
+          {"type": "close"}
+        Server -> Client:
+          {"type": "setup", "topic": "...", "age_bracket": "...", "provider": "..."}
+          {"type": "block", "title": "...", "body": "...", "modality": "...", "minutes": N}
+          {"type": "check", "prompt": "...", "item_id": "..."}
+          {"type": "feedback", "correct": bool, "text": "..."}
+          {"type": "summary", "duration_minutes": N, "blocks": N}
+          {"type": "error", "message": "..."}
+          {"type": "crisis", "resources": "..."}
+        """
+        from datetime import UTC, datetime
+
+        from clawstu.assessment.evaluator import Evaluator
+        from clawstu.engagement.session import SessionPhase, SessionRunner
+        from clawstu.orchestrator.live_content import LiveContentGenerator
+        from clawstu.orchestrator.task_kinds import TaskKind
+        from clawstu.profile.model import Domain
+        from clawstu.safety.boundaries import BoundaryEnforcer
+        from clawstu.safety.escalation import EscalationHandler
+        from clawstu.safety.gate import InboundSafetyGate
+
+        await websocket.accept()
+        gate = InboundSafetyGate(EscalationHandler(), BoundaryEnforcer())
+        evaluator = Evaluator()
+
+        try:
+            # 1. Wait for onboard message
+            data: dict[str, object] = await websocket.receive_json()
+            if data.get("type") != "onboard":
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Expected onboard message first.",
+                })
+                await websocket.close()
+                return
+
+            name = str(data.get("name", "Learner"))
+            raw_age = data.get("age", 15)
+            age = int(str(raw_age))
+            topic = str(data.get("topic", "general"))
+
+            # Build session
+            cfg = load_config()
+            providers = build_providers(cfg)
+            router = ModelRouter(config=cfg, providers=providers)
+            live = LiveContentGenerator(router=router)
+            runner = SessionRunner(live_content=live)
+
+            # Use sync onboard as the reliable path — the async
+            # onboard_with_topic hits the LLM which may be unavailable.
+            # US_HISTORY is the only domain with a seed pathway.
+            profile, ws_session = runner.onboard(
+                learner_id=name,
+                age=age,
+                domain=Domain.US_HISTORY,
+                topic=topic,
+            )
+            # Skip calibration for the WebSocket path — go
+            # straight to teaching so the client gets blocks.
+            if ws_session.phase == SessionPhase.CALIBRATING:
+                runner.finish_calibration(profile, ws_session)
+
+            provider, model = router.for_task(TaskKind.SOCRATIC_DIALOGUE)
+            provider_name = type(provider).__name__.replace("Provider", "").lower()
+
+            await websocket.send_json({
+                "type": "setup",
+                "topic": topic,
+                "age_bracket": profile.age_bracket.value,
+                "provider": f"{provider_name}/{model}",
+            })
+
+            # 2. Teach loop
+            started_at = datetime.now(UTC)
+            while True:
+                directive = runner.next_directive(profile, ws_session)
+
+                if directive.phase in (SessionPhase.CLOSING, SessionPhase.CLOSED):
+                    break
+
+                if directive.phase is SessionPhase.CRISIS_PAUSE:
+                    await websocket.send_json({
+                        "type": "crisis",
+                        "resources": directive.message or "Session paused.",
+                    })
+                    break
+
+                if directive.block is not None:
+                    block = directive.block
+                    await websocket.send_json({
+                        "type": "block",
+                        "title": block.title,
+                        "body": block.body,
+                        "modality": block.modality.value,
+                        "minutes": block.estimated_minutes,
+                    })
+
+                    # Wait for "ready" or "answer"
+                    msg: dict[str, object] = await websocket.receive_json()
+                    if msg.get("type") == "close":
+                        break
+
+                if ws_session.phase is SessionPhase.CHECKING:
+                    check_item = runner.select_check(ws_session)
+                    await websocket.send_json({
+                        "type": "check",
+                        "prompt": check_item.prompt,
+                        "item_id": check_item.id,
+                    })
+
+                    answer_msg: dict[str, object] = await websocket.receive_json()
+                    if answer_msg.get("type") == "close":
+                        break
+
+                    answer_text = str(answer_msg.get("text", ""))
+                    decision = gate.scan(answer_text)
+                    if decision.action == "crisis":
+                        ws_session.phase = SessionPhase.CRISIS_PAUSE
+                        assert decision.crisis_detection is not None
+                        resources = gate.escalation.resources(
+                            decision.crisis_detection
+                        )
+                        await websocket.send_json({
+                            "type": "crisis",
+                            "resources": resources,
+                        })
+                        break
+
+                    result = evaluator.evaluate(check_item, answer_text)
+                    runner.record_check(
+                        profile, ws_session, check_item, result,
+                    )
+                    await websocket.send_json({
+                        "type": "feedback",
+                        "correct": result.correct,
+                        "text": result.notes or (
+                            "Correct!" if result.correct else "Not quite."
+                        ),
+                    })
+
+            # 3. Send summary
+            runner.close(profile, ws_session)
+            elapsed = max(
+                1,
+                int(
+                    (datetime.now(UTC) - started_at).total_seconds() // 60
+                ),
+            )
+            await websocket.send_json({
+                "type": "summary",
+                "duration_minutes": elapsed,
+                "blocks": ws_session.blocks_presented,
+            })
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                await websocket.send_json({
+                    "type": "error",
+                    "message": str(exc),
+                })
 
     return app
 

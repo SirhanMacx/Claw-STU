@@ -10,6 +10,7 @@ let calibrationItems = [];
 let calibrationIndex = 0;
 let currentCheckItem = null;
 let currentBlock = null;
+let ws = null; // WebSocket connection (null = using HTTP fallback)
 
 // ── DOM refs ───────────────────────────────────────────────────────
 const onboardForm = document.getElementById("onboard-form");
@@ -120,6 +121,81 @@ async function api(method, path, body) {
   return resp.json();
 }
 
+// ── WebSocket session ─────────────────────────────────────────────
+function tryWebSocket(name, age, topic) {
+  return new Promise((resolve, reject) => {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const url = proto + "//" + location.host + "/ws/chat";
+    const socket = new WebSocket(url);
+    let opened = false;
+    const timeout = setTimeout(() => {
+      if (!opened) { socket.close(); reject(new Error("ws timeout")); }
+    }, 3000);
+
+    socket.onopen = () => {
+      opened = true;
+      clearTimeout(timeout);
+      socket.send(JSON.stringify({type: "onboard", name: name, age: age, topic: topic}));
+    };
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "setup") {
+        ws = socket;
+        resolve(data);
+        // Attach long-lived message handler
+        socket.onmessage = handleWsMessage;
+      } else if (data.type === "error") {
+        socket.close();
+        reject(new Error(data.message));
+      }
+    };
+
+    socket.onerror = () => { clearTimeout(timeout); reject(new Error("ws error")); };
+    socket.onclose = () => { if (!opened) { clearTimeout(timeout); reject(new Error("ws closed")); } };
+  });
+}
+
+function handleWsMessage(event) {
+  const data = JSON.parse(event.data);
+  hideTyping();
+  if (data.type === "block") {
+    state = "teaching";
+    let html = "<p><strong>" + md(data.title) + "</strong></p>";
+    html += "<p>" + md(data.body) + "</p>";
+    html += '<button class="ready-btn" id="ws-ready-btn">I\'m ready for a question</button>';
+    const msgDiv = addStuMsg(html);
+    disableInput();
+    const readyBtn = msgDiv.querySelector("#ws-ready-btn");
+    if (readyBtn) {
+      readyBtn.addEventListener("click", () => {
+        readyBtn.disabled = true;
+        readyBtn.textContent = "Loading...";
+        ws.send(JSON.stringify({type: "ready"}));
+        showTyping();
+      });
+    }
+  } else if (data.type === "check") {
+    state = "checking";
+    currentCheckItem = {id: data.item_id, prompt: data.prompt};
+    addStuMsg("<p>" + md(data.prompt) + "</p>");
+    enableInput("Type your answer...");
+  } else if (data.type === "feedback") {
+    if (data.correct) {
+      addStuMsg('<p class="correct-indicator">Correct!</p>');
+    } else {
+      addStuMsg('<p class="incorrect-indicator">' + md(data.text) + '</p>');
+    }
+    showTyping();
+  } else if (data.type === "summary") {
+    showSummary("Session complete. " + data.blocks + " blocks in " + data.duration_minutes + " minutes.");
+  } else if (data.type === "crisis") {
+    showCrisis(data.resources);
+  } else if (data.type === "error") {
+    addError(data.message);
+  }
+}
+
 // ── Onboarding ─────────────────────────────────────────────────────
 document.getElementById("onboard").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -138,6 +214,19 @@ document.getElementById("onboard").addEventListener("submit", async (e) => {
   topicDisplay.textContent = topic;
 
   const typing = showTyping();
+
+  // Try WebSocket first, fall back to HTTP
+  try {
+    const wsData = await tryWebSocket(name, age, topic);
+    hideTyping();
+    state = "teaching";
+    addStuMsg("<p>Connected via WebSocket. Topic: <strong>" + md(topic) + "</strong></p>");
+    return;
+  } catch (_wsErr) {
+    // WebSocket failed — fall back to HTTP
+    console.log("WebSocket unavailable, using HTTP fallback.");
+  }
+
   try {
     const data = await api("POST", "/sessions", {
       learner_id: name,
@@ -384,6 +473,16 @@ function handleSend() {
   if (!text) return;
   answerInput.value = "";
 
+  // WebSocket mode
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    addStudentMsg(text);
+    disableInput();
+    showTyping();
+    ws.send(JSON.stringify({type: "answer", text: text}));
+    return;
+  }
+
+  // HTTP mode
   if (state === "calibrating" && pendingCalibrationItemId) {
     const itemId = pendingCalibrationItemId;
     pendingCalibrationItemId = null;
@@ -407,6 +506,11 @@ closeBtn.addEventListener("click", function () {
 });
 
 async function closeSession() {
+  // WebSocket mode
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: "close"}));
+    return;
+  }
   if (!sessionId) return;
   disableInput();
   const typing = showTyping();
@@ -464,6 +568,7 @@ window.resetToIdle = function () {
   currentCheckItem = null;
   currentBlock = null;
   pendingCalibrationItemId = null;
+  if (ws) { try { ws.close(); } catch (_e) { /* ignore */ } ws = null; }
 
   // Clear messages
   messagesDiv.innerHTML = "";
