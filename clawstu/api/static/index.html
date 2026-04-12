@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Stuart — Personal Learning Agent</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/stu.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Phase 1: Onboarding form -->
+    <div id="onboard-form" class="card">
+      <h1>Stuart</h1>
+      <p class="tagline">A personal learning agent that grows with you.</p>
+      <form id="onboard">
+        <input type="text" id="name-input" placeholder="Your name" required>
+        <input type="number" id="age-input" placeholder="Your age" min="5" max="120" required>
+        <input type="text" id="topic-input" placeholder="What do you want to learn? (e.g. photosynthesis)" required>
+        <button type="submit">Start learning</button>
+      </form>
+      <p class="disclaimer">
+        Stuart is a cognitive tool, not a tutor or therapist.
+        AI-generated content can be wrong &mdash; always check important facts.
+      </p>
+    </div>
+
+    <!-- Phase 2: Chat interface (hidden until session starts) -->
+    <div id="chat" class="hidden">
+      <div id="chat-header">
+        <span id="topic-display">&mdash;</span>
+        <button id="close-btn" title="Close session">Close</button>
+      </div>
+      <div id="messages"></div>
+      <div id="input-area">
+        <input type="text" id="answer-input" placeholder="Type your answer..." disabled>
+        <button id="send-btn" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+  <script src="/static/stu.js"></script>
+</body>
+</html>

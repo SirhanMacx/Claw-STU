@@ -13,6 +13,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+from starlette.staticfiles import StaticFiles
 
 from clawstu import __version__
 from clawstu.api import admin, learners, profile, session
@@ -141,6 +143,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await runner.stop()
 
 
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Claw-STU",
@@ -152,6 +157,20 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(admin.router)
     app.include_router(learners.router)
+
+    # ── Web UI ──────────────────────────────────────────────────────
+    if _STATIC_DIR.is_dir():
+        app.mount(
+            "/static",
+            StaticFiles(directory=str(_STATIC_DIR)),
+            name="static",
+        )
+
+    @app.get("/", response_class=HTMLResponse)
+    def web_ui() -> str:
+        index = _STATIC_DIR / "index.html"
+        return index.read_text(encoding="utf-8")
+
     return app
 
 
