@@ -196,9 +196,17 @@ PRs welcome. Built by a teacher in New York. Every design choice lives in `docs/
 
 ---
 
+## Feature Maturity
+
+| Tier | Features |
+|---|---|
+| **Stable** | Adaptive session loop, ZPD calibration, modality rotation, 5 LLM providers (Anthropic / OpenAI / Google / Ollama / OpenRouter), ModelRouter with fallback chain, InboundSafetyGate + CRISIS_PAUSE, brain pages + dream cycle, SQLite persistence, `clawstu learn` CLI, `clawstu setup` wizard, profile export/import |
+| **Beta** | Web UI at localhost:8000, Telegram bot, Chrome extension, MCP server, WebSocket live sessions, per-student concept wiki, spaced review, scheduler (5 nightly tasks) |
+| **Experimental** | ONNX MiniLM embeddings (ships as NullEmbeddings stub; vector search degrades to keyword-only until real model is bootstrapped) |
+
 ## Status
 
-v4.12.2026 on PyPI. All 8 phases shipped: adaptive session loop, multi-provider LLM support, SQLite persistence, brain memory store, inbound safety gate, proactive scheduler, interactive CLI, and web UI. Plus Telegram bot, MCP server, Chrome extension, WebSocket chat, and HTTP API. 520 tests, mypy `--strict` clean on 89 source files, 85% coverage, under 2 seconds runtime.
+v4.12.2026 on PyPI. 520 tests, mypy `--strict` clean on 89 source files, 89% coverage, under 2 seconds runtime. CI green on Python 3.11 + 3.12.
 
 ---
 
