@@ -113,6 +113,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "cli_state",
             "cli_companions",
             "mcp_server",
+            "bot",
         }
     ),
     # setup_wizard is a sibling of cli.py — also a top-level module.
@@ -170,6 +171,7 @@ def _layer_of(relpath: pathlib.Path) -> str:
         "cli_chat.py",
         "cli_state.py",
         "cli_companions.py",
+        "bot.py",
     ):
         return "_cli"
     if len(parts) < 2:

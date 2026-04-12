@@ -42,6 +42,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+telegram = [
+    "python-telegram-bot>=21.0,<22.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -64,6 +67,8 @@ asyncio_mode = "auto"
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:pydantic.*",
+    "ignore::ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
 ]
 
 [tool.coverage.run]
@@ -103,4 +108,8 @@ disallow_untyped_defs = true
 # untyped dependency, which is where the real type discipline lives.
 [[tool.mypy.overrides]]
 module = "apscheduler.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "telegram.*"
 ignore_missing_imports = true

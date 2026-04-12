@@ -432,6 +432,32 @@ def profile_import(
     run_profile_import(path=path, overwrite=overwrite)
 
 
+@app.command()
+def bot(
+    token: str | None = typer.Option(
+        None, "--token", envvar="STU_TELEGRAM_TOKEN",
+    ),
+) -> None:
+    """Start the Stuart Telegram bot.
+
+    Requires a Telegram bot token from @BotFather.
+    Set via --token or STU_TELEGRAM_TOKEN env var.
+    """
+    if not token:
+        typer.secho(
+            "No token provided. Get one from @BotFather on Telegram.",
+            fg=typer.colors.RED,
+        )
+        typer.echo(
+            "  Set STU_TELEGRAM_TOKEN in your environment, "
+            "or pass --token <token>"
+        )
+        raise typer.Exit(code=1)
+    from clawstu.bot import run_bot
+
+    run_bot(token=token)
+
+
 @app.command("mcp-server")
 def mcp_server() -> None:
     """Start Stuart as an MCP server (stdin/stdout, for Claude Code integration).
