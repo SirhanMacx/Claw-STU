@@ -774,158 +774,30 @@ def run_profile_import(
     upserts everything into persistence, and copies the brain/
     directory back into the :class:`BrainStore`.
     """
-    import json as _json
-    import shutil
-    import tarfile
     import tempfile
     from pathlib import Path as _Path
 
     from clawstu.cli_state import save_persistence_to_disk
-    from clawstu.memory.store import _learner_hash
 
     source = _Path(path)
-    if not source.exists():
-        typer.secho(f"file not found: {source}", fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-    if not tarfile.is_tarfile(str(source)):
-        typer.secho(f"not a tarball: {source}", fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-
-    _TAR_MAX_MEMBERS = 1000
-    _TAR_MAX_TOTAL_SIZE = 100 * 1024 * 1024  # 100MB
+    _validate_import_source(source)
 
     with tempfile.TemporaryDirectory() as td:
         extract_dir = _Path(td) / "extracted"
         extract_dir.mkdir()
-        with tarfile.open(str(source), "r:gz") as tar:
-            members = tar.getmembers()
-
-            # Limit member count to prevent zip bombs.
-            if len(members) > _TAR_MAX_MEMBERS:
-                typer.secho(
-                    f"tarball has {len(members)} members "
-                    f"(max {_TAR_MAX_MEMBERS})",
-                    fg=typer.colors.RED,
-                )
-                raise typer.Exit(code=1)
-
-            # Validate paths and total size before extracting.
-            total_size = 0
-            for member in members:
-                # Path traversal protection: reject members with
-                # ".." components or absolute paths.
-                member_path = _Path(member.name)
-                if member.name.startswith("/") or ".." in member_path.parts:
-                    typer.secho(
-                        f"tarball contains unsafe path: {member.name!r}",
-                        fg=typer.colors.RED,
-                    )
-                    raise typer.Exit(code=1)
-                # Verify extraction stays within target directory.
-                resolved = (extract_dir / member.name).resolve()
-                if not str(resolved).startswith(
-                    str(extract_dir.resolve())
-                ):
-                    typer.secho(
-                        f"tarball path escapes target: {member.name!r}",
-                        fg=typer.colors.RED,
-                    )
-                    raise typer.Exit(code=1)
-                total_size += member.size
-
-            if total_size > _TAR_MAX_TOTAL_SIZE:
-                typer.secho(
-                    f"tarball total extracted size {total_size} bytes "
-                    f"exceeds max {_TAR_MAX_TOTAL_SIZE} bytes (100MB)",
-                    fg=typer.colors.RED,
-                )
-                raise typer.Exit(code=1)
-
-            tar.extractall(path=str(extract_dir), filter="data")
-
-        # Validate meta.json.
-        meta_path = extract_dir / "meta.json"
-        if not meta_path.exists():
-            typer.secho("tarball missing meta.json", fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-        meta = _json.loads(meta_path.read_text(encoding="utf-8"))
-        if meta.get("schema_version") != _EXPORT_SCHEMA_VERSION:
-            typer.secho(
-                f"unsupported schema_version: {meta.get('schema_version')}",
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(code=1)
-
-        # Deserialize profile.
-        profile_path = extract_dir / "profile.json"
-        if not profile_path.exists():
-            typer.secho("tarball missing profile.json", fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-        profile = LearnerProfile.model_validate_json(
-            profile_path.read_text(encoding="utf-8"),
-        )
+        _extract_tar_safely(source, extract_dir)
+        _validate_import_meta(extract_dir)
+        profile = _deserialize_import_profile(extract_dir)
         learner_id = profile.learner_id
 
         bundle = default_stores()
-
-        # Check for existing learner.
-        if (
-            bundle.persistence.learners.get(learner_id) is not None
-            and not overwrite
-        ):
-            typer.secho(
-                f"learner {learner_id!r} already exists. "
-                "Pass --overwrite to replace.",
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(code=1)
-
+        _check_learner_conflict(bundle, learner_id, overwrite)
         bundle.persistence.learners.upsert(profile)
 
-        # Sessions.
-        sessions_path = extract_dir / "sessions.jsonl"
-        session_count = 0
-        if sessions_path.exists():
-            for line in sessions_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                session = Session.model_validate_json(line)
-                bundle.persistence.sessions.upsert(session)
-                session_count += 1
+        session_count = _import_sessions(extract_dir, bundle)
+        event_count = _import_events(extract_dir, bundle, learner_id)
+        _import_brain_directory(extract_dir, bundle, learner_id)
 
-        # Events.
-        events_path = extract_dir / "events.jsonl"
-        event_count = 0
-        if events_path.exists():
-            for line in events_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                envelope = _json.loads(line)
-                event = ObservationEvent.model_validate(envelope.get("event", {}))
-                session_id = envelope.get("session_id")
-                resolved_sid: str | None = (
-                    session_id if isinstance(session_id, str) else None
-                )
-                bundle.persistence.events.append(
-                    event,
-                    learner_id=learner_id,
-                    session_id=resolved_sid,
-                )
-                event_count += 1
-
-        # Brain directory.
-        brain_src = extract_dir / "brain"
-        if brain_src.exists() and any(brain_src.iterdir()):
-            brain_dest = (
-                bundle.brain_store.base_dir / _learner_hash(learner_id)
-            )
-            if brain_dest.exists():
-                shutil.rmtree(brain_dest)
-            shutil.copytree(brain_src, brain_dest)
-
-        # Persist to disk.
         save_persistence_to_disk(
             bundle.persistence, bundle.state_path,
         )
@@ -934,6 +806,171 @@ def run_profile_import(
         f"\u2713 Imported learner {learner_id!r} with "
         f"{session_count} sessions and {event_count} events."
     )
+
+
+def _validate_import_source(source: Any) -> None:
+    """Validate that the import source path exists and is a tarball."""
+    import tarfile
+
+    if not source.exists():
+        typer.secho(f"file not found: {source}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    if not tarfile.is_tarfile(str(source)):
+        typer.secho(f"not a tarball: {source}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+
+def _extract_tar_safely(source: Any, extract_dir: Any) -> None:
+    """Extract tarball with zip-bomb and path-traversal protections."""
+    import tarfile
+    from pathlib import Path as _Path
+
+    _TAR_MAX_MEMBERS = 1000
+    _TAR_MAX_TOTAL_SIZE = 100 * 1024 * 1024  # 100MB
+
+    with tarfile.open(str(source), "r:gz") as tar:
+        members = tar.getmembers()
+
+        if len(members) > _TAR_MAX_MEMBERS:
+            typer.secho(
+                f"tarball has {len(members)} members "
+                f"(max {_TAR_MAX_MEMBERS})",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+
+        total_size = 0
+        for member in members:
+            member_path = _Path(member.name)
+            if member.name.startswith("/") or ".." in member_path.parts:
+                typer.secho(
+                    f"tarball contains unsafe path: {member.name!r}",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(code=1)
+            resolved = (extract_dir / member.name).resolve()
+            if not str(resolved).startswith(str(extract_dir.resolve())):
+                typer.secho(
+                    f"tarball path escapes target: {member.name!r}",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(code=1)
+            total_size += member.size
+
+        if total_size > _TAR_MAX_TOTAL_SIZE:
+            typer.secho(
+                f"tarball total extracted size {total_size} bytes "
+                f"exceeds max {_TAR_MAX_TOTAL_SIZE} bytes (100MB)",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+
+        tar.extractall(path=str(extract_dir), filter="data")
+
+
+def _validate_import_meta(extract_dir: Any) -> None:
+    """Validate the meta.json schema version inside the extracted tarball."""
+    import json as _json
+
+    meta_path = extract_dir / "meta.json"
+    if not meta_path.exists():
+        typer.secho("tarball missing meta.json", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+    if meta.get("schema_version") != _EXPORT_SCHEMA_VERSION:
+        typer.secho(
+            f"unsupported schema_version: {meta.get('schema_version')}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+
+def _deserialize_import_profile(extract_dir: Any) -> LearnerProfile:
+    """Deserialize and return the LearnerProfile from the extracted tarball."""
+    profile_path = extract_dir / "profile.json"
+    if not profile_path.exists():
+        typer.secho("tarball missing profile.json", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    return LearnerProfile.model_validate_json(
+        profile_path.read_text(encoding="utf-8"),
+    )
+
+
+def _check_learner_conflict(
+    bundle: StoreBundle, learner_id: str, overwrite: bool,
+) -> None:
+    """Raise typer.Exit if the learner already exists and overwrite is False."""
+    if (
+        bundle.persistence.learners.get(learner_id) is not None
+        and not overwrite
+    ):
+        typer.secho(
+            f"learner {learner_id!r} already exists. "
+            "Pass --overwrite to replace.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+
+def _import_sessions(extract_dir: Any, bundle: StoreBundle) -> int:
+    """Import sessions from the extracted sessions.jsonl file."""
+    sessions_path = extract_dir / "sessions.jsonl"
+    session_count = 0
+    if sessions_path.exists():
+        for line in sessions_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            session = Session.model_validate_json(line)
+            bundle.persistence.sessions.upsert(session)
+            session_count += 1
+    return session_count
+
+
+def _import_events(
+    extract_dir: Any, bundle: StoreBundle, learner_id: str,
+) -> int:
+    """Import observation events from the extracted events.jsonl file."""
+    import json as _json
+
+    events_path = extract_dir / "events.jsonl"
+    event_count = 0
+    if events_path.exists():
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            envelope = _json.loads(line)
+            event = ObservationEvent.model_validate(envelope.get("event", {}))
+            session_id = envelope.get("session_id")
+            resolved_sid: str | None = (
+                session_id if isinstance(session_id, str) else None
+            )
+            bundle.persistence.events.append(
+                event,
+                learner_id=learner_id,
+                session_id=resolved_sid,
+            )
+            event_count += 1
+    return event_count
+
+
+def _import_brain_directory(
+    extract_dir: Any, bundle: StoreBundle, learner_id: str,
+) -> None:
+    """Copy the brain/ directory from the extracted tarball into BrainStore."""
+    import shutil
+
+    from clawstu.memory.store import _learner_hash
+
+    brain_src = extract_dir / "brain"
+    if brain_src.exists() and any(brain_src.iterdir()):
+        brain_dest = (
+            bundle.brain_store.base_dir / _learner_hash(learner_id)
+        )
+        if brain_dest.exists():
+            shutil.rmtree(brain_dest)
+        shutil.copytree(brain_src, brain_dest)
 
 
 def _iter_events_for_export(

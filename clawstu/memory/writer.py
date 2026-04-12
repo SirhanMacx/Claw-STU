@@ -78,25 +78,13 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def write_session_to_memory(
-    profile: LearnerProfile,
+def _write_session_page(
     snapshot: SessionSnapshot,
     brain_store: BrainStore,
-    kg_store: KGStoreProto,
+    learner_id: str,
+    now: datetime,
 ) -> None:
-    """Update the brain for a finished session.
-
-    Idempotent-by-key: calling twice with the same snapshot produces
-    the same SessionPage, bumps the same LearnerPage timeline twice,
-    and increments the same Misconception counter twice. Callers that
-    want at-most-once semantics are responsible for that at their
-    layer (e.g., checking session status before invoking).
-    """
-    learner_id = snapshot.learner_id
-    now = _now()
-    accuracy_numerator = profile.voluntary_question_count  # cheap signal
-
-    # 1. SessionPage.
+    """Create and store a SessionPage for the finished session."""
     session_summary = (
         snapshot.summary
         or (
@@ -124,7 +112,15 @@ def write_session_to_memory(
     )
     brain_store.put(session_page, learner_id)
 
-    # 2. LearnerPage — update or create.
+
+def _write_learner_page(
+    profile: LearnerProfile,
+    snapshot: SessionSnapshot,
+    brain_store: BrainStore,
+    learner_id: str,
+    now: datetime,
+) -> None:
+    """Update or create the LearnerPage with a session-close timeline entry."""
     learner_page = brain_store.get(PageKind.LEARNER, learner_id, learner_id)
     if not isinstance(learner_page, LearnerPage):
         learner_page = LearnerPage(
@@ -143,16 +139,24 @@ def write_session_to_memory(
         )
     )
     if not learner_page.compiled_truth:
+        accuracy_numerator = profile.voluntary_question_count
         learner_page.compiled_truth = (
             f"Learner {learner_id} ({profile.age_bracket.value}). "
             f"Voluntary questions to date: {accuracy_numerator}."
         )
     brain_store.put(learner_page, learner_id)
 
-    # 3. ConceptPages — one update per concept touched.
+
+def _write_concept_pages(
+    snapshot: SessionSnapshot,
+    brain_store: BrainStore,
+    learner_id: str,
+    now: datetime,
+) -> None:
+    """Update or create a ConceptPage for each concept the session touched."""
     for concept in snapshot.concepts_touched:
         concept_page = brain_store.get(
-            PageKind.CONCEPT, concept, learner_id
+            PageKind.CONCEPT, concept, learner_id,
         )
         if not isinstance(concept_page, ConceptPage):
             concept_page = ConceptPage(
@@ -172,11 +176,18 @@ def write_session_to_memory(
         )
         brain_store.put(concept_page, learner_id)
 
-    # 4. MisconceptionPages — one per wrong-answer concept.
+
+def _write_misconception_pages(
+    snapshot: SessionSnapshot,
+    brain_store: BrainStore,
+    learner_id: str,
+    now: datetime,
+) -> None:
+    """Increment or create a MisconceptionPage for each wrong-answer concept."""
     for concept in snapshot.wrong_answer_concepts:
         misc_id = f"{concept}_miss"
         misc_page = brain_store.get(
-            PageKind.MISCONCEPTION, misc_id, learner_id
+            PageKind.MISCONCEPTION, misc_id, learner_id,
         )
         if not isinstance(misc_page, MisconceptionPage):
             misc_page = MisconceptionPage(
@@ -198,7 +209,12 @@ def write_session_to_memory(
         )
         brain_store.put(misc_page, learner_id)
 
-    # 5. Knowledge-graph triples.
+
+def _write_kg_triples(
+    snapshot: SessionSnapshot,
+    kg_store: KGStoreProto,
+) -> None:
+    """Add taught_in/includes KG triples for each concept touched."""
     for concept in snapshot.concepts_touched:
         add_triple(
             kg_store,
@@ -214,3 +230,27 @@ def write_session_to_memory(
             object_=concept,
             source_session=snapshot.session_id,
         )
+
+
+def write_session_to_memory(
+    profile: LearnerProfile,
+    snapshot: SessionSnapshot,
+    brain_store: BrainStore,
+    kg_store: KGStoreProto,
+) -> None:
+    """Update the brain for a finished session.
+
+    Idempotent-by-key: calling twice with the same snapshot produces
+    the same SessionPage, bumps the same LearnerPage timeline twice,
+    and increments the same Misconception counter twice. Callers that
+    want at-most-once semantics are responsible for that at their
+    layer (e.g., checking session status before invoking).
+    """
+    learner_id = snapshot.learner_id
+    now = _now()
+
+    _write_session_page(snapshot, brain_store, learner_id, now)
+    _write_learner_page(profile, snapshot, brain_store, learner_id, now)
+    _write_concept_pages(snapshot, brain_store, learner_id, now)
+    _write_misconception_pages(snapshot, brain_store, learner_id, now)
+    _write_kg_triples(snapshot, kg_store)

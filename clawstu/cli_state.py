@@ -99,26 +99,12 @@ def default_stores() -> StoreBundle:
     )
 
 
-def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
-    """Load a JSON snapshot into a fresh :class:`InMemoryPersistentStore`.
+def _read_and_validate_state_json(path: Path) -> dict:
+    """Read the state JSON file and validate its schema version.
 
-    Returns an empty store if the file does not exist yet. The file
-    format is a flat object with keys ``schema_version``, ``learners``,
-    ``sessions``, ``events``, ``zpd``, ``modality_outcomes``,
-    ``misconceptions``, and ``kg``. Each entry under those keys is a
-    pydantic-dumped dict (or a list of dicts, for the append-log
-    stores).
-
-    A bad JSON payload or unknown ``schema_version`` raises
-    ``ValueError`` so a corrupted state file fails loud instead of
-    silently wiping the learner's history. The ``extra="allow"``
-    behavior of pydantic keeps future schema additions
-    forward-compatible -- unknown top-level keys are ignored, and
-    unknown fields on individual entities round-trip cleanly.
+    Returns the parsed dict. Raises ValueError on bad JSON or
+    unsupported schema version.
     """
-    store = InMemoryPersistentStore()
-    if not path.exists():
-        return store
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -136,17 +122,26 @@ def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
             f"clawstu state file at {path} has schema_version={version}, "
             f"expected {_SCHEMA_VERSION}"
         )
+    return raw
 
+
+def _load_learners_and_sessions(
+    store: InMemoryPersistentStore, raw: dict,
+) -> None:
+    """Deserialize learners and sessions into the store."""
     for entry in raw.get("learners", []):
         store.learners.upsert(LearnerProfile.model_validate(entry))
-
     for entry in raw.get("sessions", []):
         store.sessions.upsert(Session.model_validate(entry))
 
-    # Events carry the (learner_id, session_id) tuple alongside the
-    # ObservationEvent body so we can restore the in-memory tuple
-    # storage exactly. ``events`` on the persistent-store contract
-    # exposes ``append()``, which is what the scheduler uses too.
+
+def _load_events(store: InMemoryPersistentStore, raw: dict) -> None:
+    """Deserialize observation events into the store.
+
+    Events carry the (learner_id, session_id) tuple alongside the
+    ObservationEvent body so we can restore the in-memory tuple
+    storage exactly.
+    """
     for entry in raw.get("events", []):
         event_data = entry.get("event")
         learner_id = entry.get("learner_id")
@@ -162,6 +157,9 @@ def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
             session_id=resolved_session,
         )
 
+
+def _load_zpd_estimates(store: InMemoryPersistentStore, raw: dict) -> None:
+    """Deserialize ZPD estimates per learner per domain into the store."""
     for learner_id, per_domain in (raw.get("zpd") or {}).items():
         if not isinstance(per_domain, dict):
             continue
@@ -177,6 +175,11 @@ def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
         if zpd_estimates:
             store.zpd.upsert_all(learner_id, zpd_estimates)
 
+
+def _load_modality_outcomes(
+    store: InMemoryPersistentStore, raw: dict,
+) -> None:
+    """Deserialize modality outcomes per learner into the store."""
     for learner_id, per_modality in (raw.get("modality_outcomes") or {}).items():
         if not isinstance(per_modality, dict):
             continue
@@ -194,6 +197,9 @@ def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
         if modality_outcomes:
             store.modality_outcomes.upsert_all(learner_id, modality_outcomes)
 
+
+def _load_misconceptions(store: InMemoryPersistentStore, raw: dict) -> None:
+    """Deserialize misconception tallies per learner into the store."""
     for learner_id, tallies in (raw.get("misconceptions") or {}).items():
         if not isinstance(tallies, dict):
             continue
@@ -204,6 +210,9 @@ def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
         if coerced:
             store.misconceptions.upsert_all(learner_id, coerced)
 
+
+def _load_kg_triples(store: InMemoryPersistentStore, raw: dict) -> None:
+    """Deserialize knowledge-graph triples into the store."""
     for triple in raw.get("kg", []):
         if not isinstance(triple, dict):
             continue
@@ -228,6 +237,25 @@ def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
             ),
         )
 
+
+def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
+    """Load a JSON snapshot into a fresh :class:`InMemoryPersistentStore`.
+
+    Returns an empty store if the file does not exist yet. A bad JSON
+    payload or unknown ``schema_version`` raises ``ValueError`` so a
+    corrupted state file fails loud instead of silently wiping history.
+    """
+    store = InMemoryPersistentStore()
+    if not path.exists():
+        return store
+
+    raw = _read_and_validate_state_json(path)
+    _load_learners_and_sessions(store, raw)
+    _load_events(store, raw)
+    _load_zpd_estimates(store, raw)
+    _load_modality_outcomes(store, raw)
+    _load_misconceptions(store, raw)
+    _load_kg_triples(store, raw)
     return store
 
 

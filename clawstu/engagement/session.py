@@ -293,32 +293,10 @@ class SessionRunner:
         Requires a live content generator either via `live_content_override`
         or via the runner's `live_content` init parameter, otherwise
         raises `LiveContentUnavailableError`.
-
-        The flow:
-        1. Build a `Topic` from the free-text input.
-        2. Ask the live generator for a concept pathway, a first
-           learning block, and a first check-for-understanding.
-        3. Stamp those onto a fresh `Session` (phase `TEACHING`,
-           `primed_block` + `primed_check` set).
-        4. Return the profile + session pair.
-
-        The session skips the seed-library calibration phase entirely.
-        Post-MVP we'll add LLM-backed calibration for topics that have
-        no seed library, but Phase 5 only needs the teach → check cycle
-        to run end-to-end with live content.
         """
-        generator = live_content_override or self._live_content
-        if generator is None:
-            raise LiveContentUnavailableError(
-                "onboard_with_topic requires a live content generator; "
-                "pass `live_content=...` to SessionRunner() or provide "
-                "`live_content_override=...` on the call."
-            )
-
-        # Imported inside the function to keep the module-level import
-        # graph engagement→stdlib+profile+curriculum+assessment+memory.
-        # `curriculum.topic.Topic` is curriculum-layer, which engagement
-        # is already allowed to import from.
+        generator = _resolve_live_generator(
+            live_content_override, self._live_content,
+        )
         from clawstu.curriculum.topic import Topic
 
         topic_obj = Topic.from_student_input(topic, domain=domain)
@@ -332,34 +310,10 @@ class SessionRunner:
             ObservationEvent(kind=EventKind.SESSION_START, domain=domain),
         )
 
-        concepts = await generator.generate_pathway(
-            topic=topic_obj,
-            age_bracket=profile.age_bracket,
-            max_concepts=4,
-        )
-        pathway = Pathway(domain=domain, concepts=concepts)
-
-        # Pick an initial modality from the rotator, then pre-generate a
-        # block + check for the first concept in the pathway so the
-        # standard `next_directive` / `select_check` / `record_check`
-        # path can drive the session without reaching into the seed
-        # content selector (which only has US History blocks).
-        initial_modality = self._rotator.initial(profile)
-        first_concept = concepts[0]
-        tier = ComplexityTier.MEETING
-        block = await generator.generate_block(
-            topic=topic_obj,
-            concept=first_concept,
-            modality=initial_modality,
-            tier=tier,
-            age_bracket=profile.age_bracket,
-        )
-        check = await generator.generate_check(
-            topic=topic_obj,
-            concept=first_concept,
-            tier=tier,
-            modality=initial_modality,
-            age_bracket=profile.age_bracket,
+        pathway, block, check, initial_modality = (
+            await _generate_live_content_for_topic(
+                generator, topic_obj, profile, domain, self._rotator,
+            )
         )
 
         session = Session(
@@ -367,7 +321,7 @@ class SessionRunner:
             domain=domain,
             topic=topic_obj.raw,
             pathway=pathway,
-            current_tier=tier,
+            current_tier=ComplexityTier.MEETING,
             current_modality=initial_modality,
             primed_block=block,
             primed_check=check,
@@ -388,62 +342,16 @@ class SessionRunner:
     ) -> tuple[LearnerProfile, Session]:
         """Resume a learner from a pre-generated NextSessionArtifact.
 
-        Spec reference: §4.8.1. The caller passes in only the entity
-        stores this method needs; the engagement layer cannot import
-        from persistence, so the protocols above describe the shape
-        the real SQLite / in-memory stores happen to satisfy.
-
-        Steps:
-
-        1. Load the `LearnerProfile` from ``learners.get``. Raise
-           ``NoArtifactError`` if the learner is not persisted — a
-           warm-start request for an unknown learner is equivalent
-           to "no artifact" for the caller (the API layer converts
-           both to HTTP 409).
-        2. Rehydrate the profile's substores (ZPD, modality outcomes,
-           misconceptions, events) so downstream runner calls see a
-           consistent in-memory object.
-        3. Load the most recent artifact from ``artifacts.get``. If
-           the row is missing, or ``consumed_at`` is already set,
-           raise ``NoArtifactError``.
-        4. Parse ``pathway_json`` / ``first_block_json`` /
-           ``first_check_json`` back into a Pathway, LearningBlock,
-           and AssessmentItem. The parser accepts both Pydantic-
-           shaped JSON (what a future scheduler would emit) and the
-           Phase 6 placeholder shape, so warm-start works against
-           whichever prepare_next_session output is on disk.
-        5. Build a fresh `Session` primed for TEACHING with the
-           parsed pathway + block + check.
-        6. Mark the artifact consumed via ``artifacts.mark_consumed``.
-        7. Return `(profile, session)`.
-
-        The returned Session has `phase = TEACHING` and
-        `primed_block` / `primed_check` set, which is the shape the
-        standard `next_directive` / `select_check` path expects.
+        Spec reference: §4.8.1. Returns a ``(profile, session)`` pair
+        with ``phase = TEACHING`` and ``primed_block`` / ``primed_check``
+        set, which is the shape ``next_directive`` / ``select_check``
+        expects.
         """
-        profile = learners.get(learner_id)
-        if profile is None:
-            raise NoArtifactError(
-                f"no persisted profile for learner {learner_id!r}"
-            )
-
-        # Rehydrate substores into the in-memory profile so the
-        # returned object is ready for `record_check` & friends to
-        # mutate without a second round-trip to persistence.
-        profile.zpd_by_domain = zpd.get_all(learner_id)
-        profile.modality_outcomes = modality_outcomes.get_all(learner_id)
-        profile.misconceptions = misconceptions.get_all(learner_id)
-        profile.events = events.list_for_learner(learner_id)
-
-        artifact = artifacts.get(learner_id)
-        if artifact is None:
-            raise NoArtifactError(
-                f"no next-session artifact for learner {learner_id!r}"
-            )
-        if artifact.get("consumed_at") is not None:
-            raise NoArtifactError(
-                f"artifact for learner {learner_id!r} already consumed"
-            )
+        profile = _load_and_rehydrate_profile(
+            learner_id, learners, zpd, modality_outcomes,
+            misconceptions, events,
+        )
+        artifact = _validate_artifact(learner_id, artifacts)
 
         pathway_raw = artifact.get("pathway_json")
         block_raw = artifact.get("first_block_json")
@@ -454,38 +362,14 @@ class SessionRunner:
                 "pathway_json / first_block_json / first_check_json"
             )
 
-        # Domain binding for the new Session comes from the learner's
-        # most-recent session if we have one; otherwise we fall back
-        # to the first ZPD estimate; otherwise the default of
-        # US_HISTORY, which is the MVP-seed domain. Warm-start is
-        # best-effort — the block + check are canonical, the session-
-        # level domain is just a tag for downstream analytics.
-        domain = _pick_domain_for_warm_start(profile)
-
-        pathway = _parse_pathway(pathway_raw, domain)
-        block = _parse_block(block_raw, domain, concept=_first_concept(pathway))
-        check = _parse_check(check_raw, domain, concept=_first_concept(pathway))
-
-        session = Session(
-            learner_id=learner_id,
-            domain=domain,
-            pathway=pathway,
-            current_tier=block.tier,
-            current_modality=block.modality,
-            primed_block=block,
-            primed_check=check,
+        session = _build_session_from_artifact(
+            learner_id, profile, pathway_raw, block_raw, check_raw,
         )
-        session.phase = SessionPhase.TEACHING
-
-        # Artifact is consumed on first successful warm-start so a
-        # subsequent call to this method for the same learner short-
-        # circuits with NoArtifactError — the client must request a
-        # fresh onboard or wait for the next scheduler tick.
         artifacts.mark_consumed(learner_id)
 
         self._observer.apply(
             profile,
-            ObservationEvent(kind=EventKind.SESSION_START, domain=domain),
+            ObservationEvent(kind=EventKind.SESSION_START, domain=session.domain),
         )
         return profile, session
 
@@ -732,6 +616,132 @@ class SessionRunner:
             if block.id == session.last_block_id:
                 return block
         raise RuntimeError(f"unknown block id on session: {session.last_block_id}")
+
+
+# -- onboard_with_topic extracted helpers ---------------------------------
+
+
+def _resolve_live_generator(
+    override: LiveContentGeneratorLike | None,
+    runner_default: LiveContentGeneratorLike | None,
+) -> LiveContentGeneratorLike:
+    """Return the live content generator or raise if unavailable."""
+    generator = override or runner_default
+    if generator is None:
+        raise LiveContentUnavailableError(
+            "onboard_with_topic requires a live content generator; "
+            "pass `live_content=...` to SessionRunner() or provide "
+            "`live_content_override=...` on the call."
+        )
+    return generator
+
+
+async def _generate_live_content_for_topic(
+    generator: LiveContentGeneratorLike,
+    topic_obj: Any,
+    profile: LearnerProfile,
+    domain: Domain,
+    rotator: ModalityRotator,
+) -> tuple[Pathway, LearningBlock, AssessmentItem, Modality]:
+    """Generate pathway, first block, and first check via live content.
+
+    Returns a ``(pathway, block, check, initial_modality)`` tuple.
+    """
+    concepts = await generator.generate_pathway(
+        topic=topic_obj,
+        age_bracket=profile.age_bracket,
+        max_concepts=4,
+    )
+    pathway = Pathway(domain=domain, concepts=concepts)
+
+    initial_modality = rotator.initial(profile)
+    first_concept = concepts[0]
+    tier = ComplexityTier.MEETING
+    block = await generator.generate_block(
+        topic=topic_obj,
+        concept=first_concept,
+        modality=initial_modality,
+        tier=tier,
+        age_bracket=profile.age_bracket,
+    )
+    check = await generator.generate_check(
+        topic=topic_obj,
+        concept=first_concept,
+        tier=tier,
+        modality=initial_modality,
+        age_bracket=profile.age_bracket,
+    )
+    return pathway, block, check, initial_modality
+
+
+# -- warm-start extracted helpers ----------------------------------------
+
+
+def _load_and_rehydrate_profile(
+    learner_id: str,
+    learners: _LearnerStoreLike,
+    zpd: _ZPDStoreLike,
+    modality_outcomes: _ModalityStoreLike,
+    misconceptions: _MisconceptionStoreLike,
+    events: _EventStoreLike,
+) -> LearnerProfile:
+    """Load a persisted profile and rehydrate all substores onto it.
+
+    Raises ``NoArtifactError`` if the learner is not persisted.
+    """
+    profile = learners.get(learner_id)
+    if profile is None:
+        raise NoArtifactError(
+            f"no persisted profile for learner {learner_id!r}"
+        )
+    profile.zpd_by_domain = zpd.get_all(learner_id)
+    profile.modality_outcomes = modality_outcomes.get_all(learner_id)
+    profile.misconceptions = misconceptions.get_all(learner_id)
+    profile.events = events.list_for_learner(learner_id)
+    return profile
+
+
+def _validate_artifact(
+    learner_id: str,
+    artifacts: _ArtifactStoreLike,
+) -> dict[str, str | None]:
+    """Load and validate the artifact, raising NoArtifactError on failure."""
+    artifact = artifacts.get(learner_id)
+    if artifact is None:
+        raise NoArtifactError(
+            f"no next-session artifact for learner {learner_id!r}"
+        )
+    if artifact.get("consumed_at") is not None:
+        raise NoArtifactError(
+            f"artifact for learner {learner_id!r} already consumed"
+        )
+    return artifact
+
+
+def _build_session_from_artifact(
+    learner_id: str,
+    profile: LearnerProfile,
+    pathway_raw: str,
+    block_raw: str,
+    check_raw: str,
+) -> Session:
+    """Parse artifact JSON and build a primed Session for TEACHING."""
+    domain = _pick_domain_for_warm_start(profile)
+    pathway = _parse_pathway(pathway_raw, domain)
+    block = _parse_block(block_raw, domain, concept=_first_concept(pathway))
+    check = _parse_check(check_raw, domain, concept=_first_concept(pathway))
+
+    session = Session(
+        learner_id=learner_id,
+        domain=domain,
+        pathway=pathway,
+        current_tier=block.tier,
+        current_modality=block.modality,
+        primed_block=block,
+        primed_check=check,
+    )
+    session.phase = SessionPhase.TEACHING
+    return session
 
 
 # -- warm-start parsing helpers ----------------------------------------
