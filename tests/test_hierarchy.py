@@ -94,7 +94,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
         {"orchestrator", "memory", "persistence", "engagement", "profile"}
     ),
     # cli is effectively api-layer (top); allow everything plus the
-    # top-level setup_wizard sibling module.
+    # top-level setup_wizard and cli_chat sibling modules.
     "_cli": frozenset(
         {
             "safety",
@@ -108,6 +108,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "api",
             "scheduler",
             "setup_wizard",
+            "cli_chat",
         }
     ),
     # setup_wizard is a sibling of cli.py — also a top-level module.

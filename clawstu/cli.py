@@ -2,10 +2,13 @@
 
 Thin wrapper over the HTTP API and the proactive scheduler. No
 pedagogical logic lives here; every command calls functions that
-already exist in clawstu.api, clawstu.orchestrator, or (Phase 4+)
-clawstu.memory / clawstu.scheduler.
+already exist in clawstu.api, clawstu.orchestrator, clawstu.memory,
+clawstu.scheduler, or (Phase 8 Part 2A) clawstu.cli_chat.
 
 Commands:
+  clawstu                                    drop into `learn` (default)
+  clawstu learn [TOPIC]                      start an interactive learning session
+  clawstu resume <learner_id>                warm-start from a pre-generated artifact
   clawstu setup                              interactive provider wizard
   clawstu serve                              start the FastAPI app
   clawstu doctor                             self-diagnosis
@@ -25,7 +28,13 @@ app: typer.Typer = typer.Typer(
         "Stuart — a personal learning agent that grows with the "
         "student. Made by a teacher, for learners."
     ),
-    no_args_is_help=True,
+    # `no_args_is_help=False` + `invoke_without_command=True` lets the
+    # callback below dispatch to the default `learn` command when the
+    # user just types `clawstu` with no args, same way `clawed` drops
+    # you into a chat. Typer still renders --help when the user passes
+    # --help explicitly, because --help exits BEFORE the callback runs.
+    no_args_is_help=False,
+    invoke_without_command=True,
     add_completion=False,
 )
 
@@ -33,6 +42,113 @@ scheduler_app: typer.Typer = typer.Typer(help="Proactive-scheduler administratio
 profile_app: typer.Typer = typer.Typer(help="Learner profile portability.")
 app.add_typer(scheduler_app, name="scheduler")
 app.add_typer(profile_app, name="profile")
+
+
+@app.callback()
+def main_callback(ctx: typer.Context) -> None:
+    """Default dispatch: ``clawstu`` with no subcommand runs ``learn``.
+
+    The callback runs on every invocation, but only routes to
+    ``learn`` when no subcommand was supplied. Subcommand flows
+    (``setup``, ``doctor``, ``serve``, etc.) still run normally
+    because ``ctx.invoked_subcommand`` is set in that case.
+    """
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(
+            learn,
+            topic=None,
+            learner_id=None,
+            age=None,
+            domain=None,
+        )
+
+
+@app.command()
+def learn(
+    topic: str | None = typer.Argument(
+        None,
+        help=(
+            "Topic to learn about. If omitted, Stuart will prompt "
+            "for it interactively."
+        ),
+    ),
+    learner_id: str | None = typer.Option(
+        None,
+        "--learner",
+        "-l",
+        help="Learner ID or name. Prompted interactively when omitted.",
+    ),
+    age: int | None = typer.Option(
+        None,
+        "--age",
+        "-a",
+        help="Learner age. Prompted interactively when omitted.",
+    ),
+    domain: str | None = typer.Option(
+        None,
+        "--domain",
+        "-d",
+        help=(
+            "Subject domain. One of: us_history, global_history, "
+            "civics, ela, science, math, other. Defaults to 'other'."
+        ),
+    ),
+) -> None:
+    """Start an interactive learning session with Stuart.
+
+    The headline command. Types a banner, asks for name / age / topic
+    if they aren't supplied, onboards the learner, teaches at least
+    one block, checks understanding, and prints a closing summary.
+    Every mutating step is checkpointed to persistence so Ctrl-C
+    leaves a resumable state behind.
+    """
+    from clawstu.cli_chat import ChatInputs, run_chat_session
+    from clawstu.profile.model import Domain
+
+    try:
+        domain_enum = Domain(domain) if domain else None
+    except ValueError as exc:
+        valid = ", ".join(d.value for d in Domain)
+        typer.secho(
+            f"unknown --domain {domain!r}; valid choices: {valid}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2) from exc
+
+    inputs = ChatInputs(
+        learner_id=learner_id,
+        age=age,
+        topic=topic,
+        domain=domain_enum,
+    )
+    run_chat_session(inputs=inputs)
+
+
+@app.command()
+def resume(
+    learner_id: str = typer.Argument(
+        ..., help="Learner ID to resume."
+    ),
+) -> None:
+    """Resume a session from a pre-generated artifact.
+
+    Warm-starts by loading the most recent unconsumed
+    :class:`NextSessionArtifact` from persistence, constructing a
+    primed :class:`Session`, and dropping the student back into the
+    same chat loop ``learn`` uses. Raises a yellow "nothing to
+    resume" message when no artifact is available.
+    """
+    from clawstu.cli_chat import run_resume_session
+    from clawstu.engagement.session import NoArtifactError
+
+    try:
+        run_resume_session(learner_id=learner_id)
+    except NoArtifactError as exc:
+        typer.secho(
+            f"nothing to resume: {exc}", fg=typer.colors.YELLOW,
+        )
+        typer.echo("Run `clawstu learn` to start a fresh session.")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()

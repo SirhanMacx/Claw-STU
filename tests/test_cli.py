@@ -31,7 +31,14 @@ def test_help_mentions_every_command() -> None:
     assert result.exit_code == 0
     # Every top-level command we register should appear in --help.
     stdout = _plain(result.stdout)
-    for command in ("serve", "doctor", "scheduler", "profile"):
+    for command in (
+        "learn",
+        "resume",
+        "serve",
+        "doctor",
+        "scheduler",
+        "profile",
+    ):
         assert command in stdout, f"--help missing '{command}'"
 
 
@@ -42,10 +49,41 @@ def test_help_shows_project_name() -> None:
     assert "clawstu" in stdout.lower() or "Stuart" in stdout
 
 
-def test_invoking_with_no_args_shows_help() -> None:
-    # Typer default: no args + no default command -> shows help (exit 0).
+def test_invoking_with_no_args_dispatches_to_learn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """`clawstu` with no args drops into the `learn` chat loop.
+
+    Phase 8 Part 2A wires a default callback that invokes the
+    ``learn`` command when no subcommand is given, mirroring how
+    ``clawed`` drops you straight into a chat. The callback then
+    hands off to ``clawstu.cli_chat.run_chat_session``. Under
+    CliRunner there's no real stdin, so the real chat loop would
+    eventually crash on a prompt read. We stub ``run_chat_session``
+    to a marker function and assert it was invoked with empty
+    ChatInputs -- that exercises the callback wiring without
+    depending on Rich's TTY behavior.
+    """
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    calls: list[Any] = []
+
+    def _fake_run_chat_session(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "clawstu.cli_chat.run_chat_session", _fake_run_chat_session,
+    )
+
     result = runner.invoke(app, [])
-    assert result.exit_code in (0, 2)  # Typer may return 2 for missing command
+    assert result.exit_code == 0, result.stdout
+    assert len(calls) == 1, (
+        f"expected run_chat_session to be invoked once; got {len(calls)}"
+    )
+    inputs = calls[0]["inputs"]
+    assert inputs.learner_id is None
+    assert inputs.age is None
+    assert inputs.topic is None
+    assert inputs.domain is None
 
 
 def test_doctor_prints_config_summary() -> None:
@@ -158,3 +196,109 @@ def test_setup_command_runs_in_echo_only_mode(
     assert secrets.exists(), "wizard did not write secrets.json"
     payload = json.loads(secrets.read_text())
     assert payload == {"primary_provider": "echo"}
+
+
+def test_learn_command_exists_in_help() -> None:
+    """`clawstu learn --help` returns 0 and describes the learning session."""
+    result = runner.invoke(app, ["learn", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "learn" in stdout.lower()
+    # The help body should mention the topic argument.
+    assert "topic" in stdout.lower()
+
+
+def test_resume_command_exists_in_help() -> None:
+    """`clawstu resume --help` returns 0 and describes warm-start."""
+    result = runner.invoke(app, ["resume", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "resume" in stdout.lower()
+
+
+def test_learn_command_forwards_topic_and_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """`clawstu learn <topic>` passes its args through to ChatInputs."""
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    calls: list[Any] = []
+
+    def _fake_run_chat_session(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "clawstu.cli_chat.run_chat_session", _fake_run_chat_session,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "learn",
+            "The Haitian Revolution",
+            "--learner", "ada",
+            "--age", "15",
+            "--domain", "global_history",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert len(calls) == 1
+    inputs = calls[0]["inputs"]
+    assert inputs.topic == "The Haitian Revolution"
+    assert inputs.learner_id == "ada"
+    assert inputs.age == 15
+    # Domain is a Domain enum, not a raw string.
+    from clawstu.profile.model import Domain
+    assert inputs.domain is Domain.GLOBAL_HISTORY
+
+
+def test_learn_command_rejects_unknown_domain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """`--domain nonsense` exits non-zero with a helpful message."""
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    result = runner.invoke(
+        app,
+        ["learn", "photosynthesis", "--domain", "not_a_real_domain"],
+    )
+    assert result.exit_code == 2
+    stdout = _plain(result.stdout)
+    assert "not_a_real_domain" in stdout or "unknown" in stdout.lower()
+
+
+def test_resume_command_forwards_learner_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """`clawstu resume ada` calls ``run_resume_session(learner_id='ada')``."""
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    calls: list[Any] = []
+
+    def _fake_run_resume_session(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "clawstu.cli_chat.run_resume_session", _fake_run_resume_session,
+    )
+
+    result = runner.invoke(app, ["resume", "ada"])
+    assert result.exit_code == 0, result.stdout
+    assert calls == [{"learner_id": "ada"}]
+
+
+def test_resume_command_without_artifact_reports_nothing_to_resume(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """NoArtifactError is surfaced as a yellow message + exit code 1."""
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    from clawstu.engagement.session import NoArtifactError
+
+    def _raises(**_kwargs: Any) -> None:
+        raise NoArtifactError("no artifact for learner 'ada'")
+
+    monkeypatch.setattr(
+        "clawstu.cli_chat.run_resume_session", _raises,
+    )
+    result = runner.invoke(app, ["resume", "ada"])
+    assert result.exit_code == 1
+    stdout = _plain(result.stdout)
+    assert "nothing to resume" in stdout
+    assert "clawstu learn" in stdout
