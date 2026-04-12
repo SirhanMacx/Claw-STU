@@ -336,3 +336,88 @@ def test_review_empty_returns_friendly_message(
     assert result.exit_code == 0, result.stdout
     stdout = _plain(result.stdout)
     assert "nothing due yet" in stdout.lower()
+
+
+# ── ask ───────────────────────────────────────────────────────────
+
+
+def _force_echo_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Force the CLI to route everything through the EchoProvider.
+
+    Writes a ``secrets.json`` that overrides ``primary_provider`` to
+    ``echo`` AND rewrites the task routing table so every task uses the
+    ``echo`` provider. Also clears ambient API keys so
+    ``build_providers`` doesn't build any real provider besides echo +
+    the always-present ollama stub.
+
+    The Ollama provider is always constructed (it uses localhost and
+    fails at ``.complete()`` time, not at construction time), so the
+    only reliable way to keep it off the hot path is to route every
+    task-kind primary to echo in the config.
+    """
+    monkeypatch.setenv("STU_PRIMARY_PROVIDER", "echo")
+    for key in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY", "OLLAMA_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    # Write a secrets.json that overrides the task routing table.
+    import json as _json
+
+    from clawstu.orchestrator.task_kinds import TaskKind
+
+    echo_route = {"provider": "echo", "model": "echo-stub"}
+    routing: dict[str, dict[str, str | int | float]] = {}
+    for kind in TaskKind:
+        routing[kind.value] = echo_route
+    secrets = {"primary_provider": "echo", "task_routing": routing}
+    (tmp_path / "secrets.json").write_text(
+        _json.dumps(secrets), encoding="utf-8",
+    )
+
+
+def test_ask_with_echo_provider_returns_deterministic_response(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """In echo mode the response is a deterministic stub containing [echo]."""
+    _monkeypatch_stores(monkeypatch, tmp_path)
+    _force_echo_mode(monkeypatch, tmp_path)
+    result = runner.invoke(
+        app, ["ask", "What is photosynthesis?", "--learner", "ada"],
+    )
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "[echo]" in stdout
+
+
+def test_ask_shows_offline_warning_in_echo_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """When no real providers are configured, the offline warning appears."""
+    _monkeypatch_stores(monkeypatch, tmp_path)
+    _force_echo_mode(monkeypatch, tmp_path)
+    result = runner.invoke(
+        app, ["ask", "What is mitosis?", "--learner", "ada"],
+    )
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "offline demo mode" in stdout or "clawstu setup" in stdout
+
+
+def test_ask_passes_question_through_reasoning_chain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """The question text appears in the echo response, confirming chain usage."""
+    _monkeypatch_stores(monkeypatch, tmp_path)
+    _force_echo_mode(monkeypatch, tmp_path)
+    result = runner.invoke(
+        app, ["ask", "Explain supply and demand", "--learner", "ada"],
+    )
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    # The EchoProvider returns the prompt back verbatim, so the user's
+    # question (or a prefix of it) should appear in the response.
+    assert "supply" in stdout.lower() or "demand" in stdout.lower()

@@ -209,6 +209,31 @@ def review(
 
 
 @app.command()
+def ask(
+    question: str = typer.Argument(
+        ..., help="Your question.",
+    ),
+    learner_id: str | None = typer.Option(
+        None,
+        "--learner",
+        "-l",
+        help=(
+            "Learner ID. Defaults to the most recently active learner."
+        ),
+    ),
+) -> None:
+    """One-shot Socratic question outside of a structured session.
+
+    Routed through ReasoningChain.ask() with TaskKind.SOCRATIC_DIALOGUE.
+    No session state is created or modified. Use ``clawstu learn`` for
+    a full adaptive teach-assess cycle.
+    """
+    from clawstu.cli_companions import run_ask
+
+    run_ask(question=question, learner_id=learner_id)
+
+
+@app.command()
 def resume(
     learner_id: str = typer.Argument(
         ..., help="Learner ID to resume."

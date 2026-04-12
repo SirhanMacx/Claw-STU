@@ -344,3 +344,11 @@ def test_review_command_exists_in_help() -> None:
     assert result.exit_code == 0, result.stdout
     stdout = _plain(result.stdout)
     assert "review" in stdout.lower()
+
+
+def test_ask_command_exists_in_help() -> None:
+    """`clawstu ask --help` returns 0 and describes the one-shot question."""
+    result = runner.invoke(app, ["ask", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "question" in stdout.lower()

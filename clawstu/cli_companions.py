@@ -503,6 +503,146 @@ def _concepts_due_for_review(
 
 
 # ---------------------------------------------------------------------------
+# ask
+# ---------------------------------------------------------------------------
+
+_OFFLINE_WARNING = (
+    "\u26a0 Running in offline demo mode. "
+    "Run `clawstu setup` to configure a real provider for real answers."
+)
+
+
+def run_ask(question: str, learner_id: str | None) -> None:
+    """Implement ``clawstu ask QUESTION [--learner ID]``.
+
+    One-shot Socratic question routed through
+    :meth:`ReasoningChain.ask`. No session state is created or
+    modified -- for a full adaptive teach-assess cycle, the student
+    should use ``clawstu learn``.
+
+    If no learner exists the question is answered as an anonymous
+    query -- no memory injection, no brain context. If a learner
+    IS resolved, we inject a short brain slice via
+    :func:`build_learner_context` so the chain can adapt its answer
+    to the student's level and history.
+    """
+    import asyncio
+
+    from clawstu.api.main import build_providers
+    from clawstu.memory.context import build_learner_context
+    from clawstu.orchestrator.chain import ReasoningChain
+    from clawstu.orchestrator.config import load_config
+    from clawstu.orchestrator.router import ModelRouter
+    from clawstu.orchestrator.task_kinds import TaskKind
+
+    bundle = default_stores()
+    console = _render_console()
+
+    # Resolve the learner if possible; fall through to anonymous on
+    # failure. We intentionally do NOT raise typer.Exit here -- a
+    # question like ``clawstu ask "what is mitosis"`` should always
+    # return an answer, even if the user has never run ``learn``.
+    resolved: _ResolvedLearner | None = None
+    if learner_id is not None:
+        profile = bundle.persistence.learners.get(learner_id)
+        if profile is not None:
+            resolved = _ResolvedLearner(
+                learner_id=learner_id, profile=profile,
+            )
+    elif any(True for _ in _iter_learner_ids(bundle.persistence)):
+        try:
+            resolved_id = most_recent_learner(bundle.persistence)
+            profile = bundle.persistence.learners.get(resolved_id)
+            if profile is not None:
+                resolved = _ResolvedLearner(
+                    learner_id=resolved_id, profile=profile,
+                )
+        except NoLearnersError:
+            pass
+
+    # Build the reasoning chain.
+    cfg = load_config()
+    providers = build_providers(cfg)
+    router = ModelRouter(config=cfg, providers=providers)
+    chain = ReasoningChain(router=router)
+
+    # Check for echo/offline mode. The router resolves
+    # SOCRATIC_DIALOGUE at construction time; if it landed on the
+    # EchoProvider, we're in offline demo mode regardless of what
+    # other providers happen to be in the dict.
+    sd_provider, _sd_model = router.for_task(TaskKind.SOCRATIC_DIALOGUE)
+    if type(sd_provider).__name__ == "EchoProvider":
+        console.print(
+            Panel(
+                _OFFLINE_WARNING,
+                border_style="yellow",
+            )
+        )
+
+    # Optionally inject learner context.
+    effective_question = question
+    if resolved is not None:
+        context = build_learner_context(
+            learner_id=resolved.learner_id,
+            concept=question[:50],
+            brain_store=bundle.brain_store,
+            kg_store=bundle.persistence.kg,
+            max_chars=2000,
+        )
+        if context.text.strip():
+            effective_question = (
+                f"<learner_context>\n{context.text}\n</learner_context>\n\n"
+                f"{question}"
+            )
+
+    async def _ask_and_cleanup() -> str:
+        """Run the chain and close provider transports when done.
+
+        ``build_providers`` constructs an ``OllamaProvider`` that opens
+        an ``httpx.AsyncClient``. If we let the event loop close with
+        the transport still open, Python emits ``ResourceWarning:
+        unclosed transport``, which fails under ``filterwarnings =
+        "error"``. Explicit cleanup avoids that.
+        """
+        try:
+            return await chain.ask(
+                effective_question,
+                task_kind=TaskKind.SOCRATIC_DIALOGUE,
+            )
+        finally:
+            for provider in providers.values():
+                client = getattr(provider, "_client", None)
+                if client is not None and hasattr(client, "aclose"):
+                    await client.aclose()
+
+    answer = asyncio.run(_ask_and_cleanup())
+    console.print(
+        Panel(
+            Markdown(answer),
+            title="Stuart",
+            border_style="blue",
+            box=box.SIMPLE_HEAVY,
+        )
+    )
+
+
+def _iter_learner_ids(
+    store: InMemoryPersistentStore,
+) -> list[str]:
+    """List learner ids in the store.
+
+    Minimal helper that pokes the private ``_rows`` on the learner
+    store. Same pattern as ``cli_state._iter_learners`` but returns
+    only the id list -- kept separate so ``run_ask`` doesn't import
+    from ``cli_state._iter_learners`` (which is not exported).
+    """
+    raw: object = getattr(store.learners, "_rows", {})
+    if not isinstance(raw, dict):
+        return []
+    return list(raw.keys())
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers (exported for the tests)
 # ---------------------------------------------------------------------------
 
@@ -520,6 +660,7 @@ def build_stores_for_tests() -> StoreBundle:
 __all__ = [
     "NoLearnersError",
     "build_stores_for_tests",
+    "run_ask",
     "run_history",
     "run_progress",
     "run_review",
