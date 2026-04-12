@@ -204,17 +204,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(
-        title="Claw-STU",
-        description="Stuart — a personal learning agent that grows with the student.",
-        version=__version__,
-        lifespan=lifespan,
-    )
-
-    # ── CORS ────────────────────────────────────────────────────────
-    # Supports localhost + Chrome extension origins.  Mirrors Claw-ED's
-    # pattern (clawed/api/server.py) for cross-repo consistency.
+def _configure_cors(app: FastAPI) -> None:
+    """Add CORS middleware with localhost + Chrome extension origins."""
     cors_origins_raw = os.environ.get("CLAW_STU_CORS_ORIGINS", "")
     if cors_origins_raw:
         cors_origins = [
@@ -234,13 +225,18 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
 
+
+def _register_routes(app: FastAPI) -> None:
+    """Attach all API routers to the app."""
     app.include_router(session.router)
     app.include_router(profile.router)
     app.include_router(admin.router)
     app.include_router(learners.router)
     app.include_router(quick.router)
 
-    # ── Web UI ──────────────────────────────────────────────────────
+
+def _mount_static(app: FastAPI) -> None:
+    """Serve the static directory and the ``GET /`` web UI endpoint."""
     if _STATIC_DIR.is_dir():
         app.mount(
             "/static",
@@ -253,9 +249,10 @@ def create_app() -> FastAPI:
         index = _STATIC_DIR / "index.html"
         return index.read_text(encoding="utf-8")
 
-    # ── Root-level /health alias ─────────────────────────────────────
-    # README promises ``GET /health``; the canonical endpoint lives at
-    # ``/admin/health``. This alias keeps both paths valid.
+
+def _register_health_alias(app: FastAPI) -> None:
+    """Add the root-level ``GET /health`` alias for ``/admin/health``."""
+
     @app.get("/health", response_model=admin.HealthResponse)
     def health_alias(
         request: Request,
@@ -263,305 +260,447 @@ def create_app() -> FastAPI:
     ) -> admin.HealthResponse:
         return admin.health(request=request, state=state)
 
-    # ── WebSocket live sessions ───────────────────────────────────────
-    @app.websocket("/ws/chat")
-    async def websocket_chat(websocket: WebSocket) -> None:
-        """Full session lifecycle over a single WebSocket connection.
 
-        Protocol (JSON):
-        Client -> Server:
-          {"type": "onboard", "name": "...", "age": N, "topic": "..."}
-          {"type": "answer", "text": "..."}
-          {"type": "ready"}
-          {"type": "close"}
-        Server -> Client:
-          {"type": "setup", "topic": "...", "age_bracket": "...", "provider": "..."}
-          {"type": "block", "title": "...", "body": "...", "modality": "...", "minutes": N}
-          {"type": "check", "prompt": "...", "item_id": "..."}
-          {"type": "feedback", "correct": bool, "text": "..."}
-          {"type": "summary", "duration_minutes": N, "blocks": N}
-          {"type": "error", "message": "..."}
-          {"type": "degraded", "reason": "..."}
-          {"type": "crisis", "resources": "..."}
+# ── WebSocket helpers (STU-F2) ───────────────────────────────────────
 
-        Auth: bearer token via ``?token=xxx`` query parameter. In dev
-        mode with no token configured, connections are allowed without
-        auth. Messages are rate-limited to 30/minute per connection and
-        max 4KB per message.
-        """
-        import contextlib
-        from datetime import UTC, datetime
 
-        import httpx
+async def _ws_receive_validated_json(
+    websocket: WebSocket,
+    rate_limiter: _WsRateLimiter,
+) -> dict[str, object] | None:
+    """Receive a JSON message with size + rate limit checks.
 
-        from clawstu.api.auth import validate_token
-        from clawstu.assessment.evaluator import Evaluator
-        from clawstu.engagement.session import SessionPhase, SessionRunner
-        from clawstu.orchestrator.live_content import LiveContentGenerator, LiveGenerationError
-        from clawstu.orchestrator.providers import ProviderError
-        from clawstu.orchestrator.task_kinds import TaskKind
-        from clawstu.profile.model import Domain
-        from clawstu.safety.boundaries import BoundaryEnforcer
-        from clawstu.safety.escalation import EscalationHandler
-        from clawstu.safety.gate import InboundSafetyGate
+    Returns None if rate-limited or oversized (error already sent
+    to the client).
+    """
+    import json
 
-        # ── Auth check (STU-1) ─────────────────────────────────────
-        token = websocket.query_params.get("token")
-        if not validate_token(token):
-            # Must accept before sending a close frame with payload.
-            await websocket.accept()
+    raw = await websocket.receive_text()
+    if len(raw.encode("utf-8")) > _WS_MAX_MESSAGE_SIZE:
+        await websocket.send_json({
+            "type": "error",
+            "message": "message too large (max 4KB)",
+        })
+        return None
+    if not rate_limiter.check():
+        await websocket.send_json({
+            "type": "error",
+            "message": "rate limit exceeded (max 30/minute)",
+        })
+        return None
+    result: dict[str, object] = json.loads(raw)
+    return result
+
+
+async def _ws_authenticate(websocket: WebSocket) -> bool:
+    """Check the bearer token and accept the connection.
+
+    Returns True if auth succeeded and the socket is accepted.
+    Returns False after sending an error frame and closing the socket.
+    """
+    from clawstu.api.auth import validate_token
+
+    token = websocket.query_params.get("token")
+    if not validate_token(token):
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "error",
+            "message": "unauthorized",
+        })
+        await websocket.close(code=1008)
+        return False
+
+    await websocket.accept()
+    return True
+
+
+async def _ws_parse_onboard(
+    websocket: WebSocket,
+    rate_limiter: _WsRateLimiter,
+) -> WsOnboardMessage | None:
+    """Receive and validate the onboard message.
+
+    Returns the parsed ``WsOnboardMessage``, or ``None`` if the
+    connection should be closed (error already sent to client).
+    """
+    raw_data = await _ws_receive_validated_json(websocket, rate_limiter)
+    if raw_data is None:
+        await websocket.close()
+        return None
+
+    if raw_data.get("type") != "onboard":
+        await websocket.send_json({
+            "type": "error",
+            "message": "Expected onboard message first.",
+        })
+        await websocket.close()
+        return None
+
+    try:
+        return WsOnboardMessage.model_validate(raw_data)
+    except ValidationError:
+        await websocket.send_json({
+            "type": "error",
+            "message": "invalid message format",
+        })
+        await websocket.close()
+        return None
+
+
+def _ws_build_session(
+    msg: WsOnboardMessage,
+) -> tuple[object, object, object, ModelRouter, bool, str | None]:
+    """Build session objects from a validated onboard message.
+
+    Returns ``(profile, session, runner, router, degraded, reason)``.
+    Synchronous except for topic-aware paths -- callers must handle
+    the async ``onboard_with_topic`` branch separately.
+    """
+    from clawstu.engagement.session import SessionPhase, SessionRunner
+    from clawstu.orchestrator.live_content import LiveContentGenerator
+    from clawstu.profile.model import Domain
+
+    domain = Domain(str(msg.domain)) if msg.domain is not None else Domain.OTHER
+
+    cfg = load_config()
+    providers = build_providers(cfg)
+    router = ModelRouter(config=cfg, providers=providers)
+    live = LiveContentGenerator(router=router)
+    runner = SessionRunner(live_content=live)
+
+    prof, ws_sess = runner.onboard(
+        learner_id=msg.name, age=msg.age, domain=domain, topic=msg.topic,
+    )
+    if ws_sess.phase == SessionPhase.CALIBRATING:
+        runner.finish_calibration(prof, ws_sess)
+
+    return prof, ws_sess, runner, router, False, None
+
+
+def _ws_fallback_onboard(
+    runner: object,
+    msg: WsOnboardMessage,
+    domain: object,
+) -> tuple[object, object, str]:
+    """Seed-library fallback when live provider is unreachable (STU-5).
+
+    Tries the requested domain first; falls back to US_HISTORY if
+    the domain has no seed pathways.  Returns (profile, session, reason).
+    """
+    from clawstu.profile.model import Domain
+
+    reason = "provider unreachable, using seed library"
+    try:
+        prof, ws_sess = runner.onboard(  # type: ignore[attr-defined]
+            learner_id=msg.name, age=msg.age,
+            domain=domain, topic=msg.topic,
+        )
+    except ValueError:
+        prof, ws_sess = runner.onboard(  # type: ignore[attr-defined]
+            learner_id=msg.name, age=msg.age,
+            domain=Domain.US_HISTORY, topic=msg.topic,
+        )
+        if domain != Domain.US_HISTORY:
+            reason = (
+                f"provider unreachable, using seed library; "
+                f"domain changed from {domain.value} "  # type: ignore[attr-defined]
+                f"to us_history (only seed domain available)"
+            )
+    return prof, ws_sess, reason
+
+
+async def _ws_build_session_with_topic(
+    msg: WsOnboardMessage,
+) -> tuple[object, object, object, ModelRouter, bool, str | None]:
+    """Build session with topic-aware live-content onboarding.
+
+    Falls back to the seed-library path when the provider is
+    unreachable (STU-5 degraded mode).
+    """
+    import httpx
+
+    from clawstu.engagement.session import SessionPhase, SessionRunner
+    from clawstu.orchestrator.live_content import (
+        LiveContentGenerator,
+        LiveGenerationError,
+    )
+    from clawstu.orchestrator.providers import ProviderError
+    from clawstu.profile.model import Domain
+
+    domain = Domain(str(msg.domain)) if msg.domain is not None else Domain.OTHER
+    cfg = load_config()
+    providers = build_providers(cfg)
+    router = ModelRouter(config=cfg, providers=providers)
+    runner = SessionRunner(live_content=LiveContentGenerator(router=router))
+
+    try:
+        prof, ws_sess = await runner.onboard_with_topic(
+            learner_id=msg.name, age=msg.age, domain=domain, topic=msg.topic,
+        )
+        degraded, reason = False, None
+    except (
+        ConnectionError, TimeoutError, httpx.HTTPError,
+        ValueError, OSError, ProviderError, LiveGenerationError,
+    ):
+        degraded = True
+        prof, ws_sess, reason = _ws_fallback_onboard(runner, msg, domain)
+
+    if ws_sess.phase == SessionPhase.CALIBRATING:
+        runner.finish_calibration(prof, ws_sess)
+
+    return prof, ws_sess, runner, router, degraded, reason
+
+
+async def _ws_handle_onboard(
+    websocket: WebSocket,
+    rate_limiter: _WsRateLimiter,
+) -> tuple[object, object, object, ModelRouter] | None:
+    """Orchestrate onboard: parse, build session, send setup message.
+
+    Returns ``(profile, ws_session, runner, router)`` on success, or
+    ``None`` if the connection should be closed.
+    """
+    from clawstu.orchestrator.task_kinds import TaskKind
+    from clawstu.profile.model import Domain
+
+    msg = await _ws_parse_onboard(websocket, rate_limiter)
+    if msg is None:
+        return None
+
+    if msg.topic is not None:
+        prof, ws_sess, runner, router, degraded, reason = (
+            await _ws_build_session_with_topic(msg)
+        )
+    else:
+        prof, ws_sess, runner, router, degraded, reason = (
+            _ws_build_session(msg)
+        )
+
+    if degraded:
+        await websocket.send_json({"type": "degraded", "reason": reason})
+
+    domain = Domain(str(msg.domain)) if msg.domain is not None else Domain.OTHER
+    provider, model = router.for_task(TaskKind.SOCRATIC_DIALOGUE)
+    provider_name = type(provider).__name__.replace("Provider", "").lower()
+    await websocket.send_json({
+        "type": "setup",
+        "topic": msg.topic or domain.value,
+        "age_bracket": prof.age_bracket.value,
+        "provider": f"{provider_name}/{model}",
+    })
+
+    return prof, ws_sess, runner, router
+
+
+async def _ws_handle_crisis(
+    websocket: WebSocket,
+    ws_session: object,
+    decision: object,
+    gate: object,
+) -> None:
+    """Escalate a crisis: update phase and send crisis message."""
+    from clawstu.engagement.session import SessionPhase
+
+    ws_session.phase = SessionPhase.CRISIS_PAUSE  # type: ignore[attr-defined]
+    assert decision.crisis_detection is not None  # type: ignore[attr-defined]
+    resources = gate.escalation.resources(  # type: ignore[attr-defined]
+        decision.crisis_detection,  # type: ignore[attr-defined]
+    )
+    await websocket.send_json({
+        "type": "crisis",
+        "resources": resources,
+    })
+
+
+async def _ws_send_summary(
+    websocket: WebSocket,
+    runner: object,
+    profile_obj: object,
+    ws_session: object,
+    started_at: object,
+) -> None:
+    """Close the session and send a summary message."""
+    from datetime import UTC, datetime
+
+    runner.close(profile_obj, ws_session)  # type: ignore[attr-defined]
+    elapsed = max(
+        1,
+        int(
+            (datetime.now(UTC) - started_at).total_seconds() // 60  # type: ignore[operator]
+        ),
+    )
+    await websocket.send_json({
+        "type": "summary",
+        "duration_minutes": elapsed,
+        "blocks": ws_session.blocks_presented,  # type: ignore[attr-defined]
+    })
+
+
+async def _ws_run_teach_loop(
+    websocket: WebSocket,
+    runner: object,
+    profile_obj: object,
+    ws_session: object,
+    gate: object,
+    evaluator: object,
+    rate_limiter: _WsRateLimiter,
+) -> None:
+    """Drive the teach/check loop until closing, crisis, or disconnect."""
+    from clawstu.engagement.session import SessionPhase
+
+    while True:
+        directive = runner.next_directive(profile_obj, ws_session)  # type: ignore[attr-defined]
+
+        if directive.phase in (SessionPhase.CLOSING, SessionPhase.CLOSED):
+            break
+
+        if directive.phase is SessionPhase.CRISIS_PAUSE:
+            await websocket.send_json({
+                "type": "crisis",
+                "resources": directive.message or "Session paused.",
+            })
+            break
+
+        if directive.block is not None:
+            block = directive.block
+            await websocket.send_json({
+                "type": "block",
+                "title": block.title,
+                "body": block.body,
+                "modality": block.modality.value,
+                "minutes": block.estimated_minutes,
+            })
+            raw_msg = await _ws_receive_validated_json(
+                websocket, rate_limiter,
+            )
+            if raw_msg is None or raw_msg.get("type") == "close":
+                break
+
+        if ws_session.phase is SessionPhase.CHECKING:  # type: ignore[attr-defined]
+            should_break = await _ws_handle_check(
+                websocket, runner, profile_obj, ws_session,
+                gate, evaluator, rate_limiter,
+            )
+            if should_break:
+                break
+
+
+async def _ws_handle_check(
+    websocket: WebSocket,
+    runner: object,
+    profile_obj: object,
+    ws_session: object,
+    gate: object,
+    evaluator: object,
+    rate_limiter: _WsRateLimiter,
+) -> bool:
+    """Handle a single check item.  Returns True if the loop should break."""
+    check_item = runner.select_check(ws_session)  # type: ignore[attr-defined]
+    await websocket.send_json({
+        "type": "check",
+        "prompt": check_item.prompt,
+        "item_id": check_item.id,
+    })
+
+    raw_answer = await _ws_receive_validated_json(websocket, rate_limiter)
+    if raw_answer is None or raw_answer.get("type") == "close":
+        return True
+
+    try:
+        answer_validated = WsAnswerMessage.model_validate(raw_answer)
+        answer_text = answer_validated.text
+    except ValidationError:
+        await websocket.send_json({
+            "type": "error",
+            "message": "invalid message format",
+        })
+        return True
+
+    decision = gate.scan(answer_text)  # type: ignore[attr-defined]
+    if decision.action == "crisis":
+        await _ws_handle_crisis(websocket, ws_session, decision, gate)
+        return True
+
+    result = evaluator.evaluate(check_item, answer_text)  # type: ignore[attr-defined]
+    runner.record_check(  # type: ignore[attr-defined]
+        profile_obj, ws_session, check_item, result,
+    )
+    await websocket.send_json({
+        "type": "feedback",
+        "correct": result.correct,
+        "text": result.notes or (
+            "Correct!" if result.correct else "Not quite."
+        ),
+    })
+    return False
+
+
+# ── WebSocket endpoint ───────────────────────────────────────────────
+
+
+async def _websocket_chat(websocket: WebSocket) -> None:
+    """Full session lifecycle over a single WebSocket connection.
+
+    Orchestrates auth -> onboard -> teach loop -> summary.
+    See module docstring for the full JSON protocol.
+    Rate-limited to 30 msg/min, max 4KB per message.
+    """
+    import contextlib
+    from datetime import UTC, datetime
+
+    from clawstu.assessment.evaluator import Evaluator
+    from clawstu.safety.boundaries import BoundaryEnforcer
+    from clawstu.safety.escalation import EscalationHandler
+    from clawstu.safety.gate import InboundSafetyGate
+
+    if not await _ws_authenticate(websocket):
+        return
+
+    rate_limiter = _WsRateLimiter()
+    gate = InboundSafetyGate(EscalationHandler(), BoundaryEnforcer())
+    evaluator = Evaluator()
+
+    try:
+        result = await _ws_handle_onboard(websocket, rate_limiter)
+        if result is None:
+            return
+        prof, ws_session, runner, _router = result
+
+        started_at = datetime.now(UTC)
+        await _ws_run_teach_loop(
+            websocket, runner, prof, ws_session,
+            gate, evaluator, rate_limiter,
+        )
+        await _ws_send_summary(
+            websocket, runner, prof, ws_session, started_at,
+        )
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        with contextlib.suppress(Exception):
             await websocket.send_json({
                 "type": "error",
-                "message": "unauthorized",
-            })
-            await websocket.close(code=1008)
-            return
-
-        await websocket.accept()
-
-        rate_limiter = _WsRateLimiter()
-        gate = InboundSafetyGate(EscalationHandler(), BoundaryEnforcer())
-        evaluator = Evaluator()
-
-        async def _receive_validated_json() -> dict[str, object] | None:
-            """Receive a JSON message with size + rate limit checks.
-
-            Returns None if rate-limited or oversized (error already
-            sent to the client).
-            """
-            raw = await websocket.receive_text()
-            if len(raw.encode("utf-8")) > _WS_MAX_MESSAGE_SIZE:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "message too large (max 4KB)",
-                })
-                return None
-            if not rate_limiter.check():
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "rate limit exceeded (max 30/minute)",
-                })
-                return None
-            import json
-            result: dict[str, object] = json.loads(raw)
-            return result
-
-        try:
-            # 1. Wait for onboard message
-            raw_data = await _receive_validated_json()
-            if raw_data is None:
-                await websocket.close()
-                return
-
-            if raw_data.get("type") != "onboard":
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "Expected onboard message first.",
-                })
-                await websocket.close()
-                return
-
-            # Validate through pydantic model (STU-7)
-            try:
-                onboard_msg = WsOnboardMessage.model_validate(raw_data)
-            except ValidationError:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "invalid message format",
-                })
-                await websocket.close()
-                return
-
-            name = onboard_msg.name
-            age = onboard_msg.age
-            topic = onboard_msg.topic
-            domain_raw = onboard_msg.domain
-            domain = Domain(str(domain_raw)) if domain_raw is not None else Domain.OTHER
-
-            # Build session
-            cfg = load_config()
-            providers = build_providers(cfg)
-            router = ModelRouter(config=cfg, providers=providers)
-            live = LiveContentGenerator(router=router)
-            runner = SessionRunner(live_content=live)
-
-            degraded = False
-            degraded_reason: str | None = None
-            original_domain = domain
-
-            if topic is not None:
-                # Topic-aware path: live-content onboarding.  If the
-                # provider is unreachable (e.g. no Ollama daemon in
-                # tests), fall back to the sync path so the session
-                # still starts.  The fallback uses US_HISTORY because
-                # it is the only domain with seed pathways in the
-                # deterministic content library.
-                try:
-                    profile, ws_session = await runner.onboard_with_topic(
-                        learner_id=name,
-                        age=age,
-                        domain=domain,
-                        topic=topic,
-                    )
-                except (ConnectionError, TimeoutError, httpx.HTTPError, ValueError, OSError, ProviderError, LiveGenerationError):
-                    # Provider unreachable — fall back to the sync
-                    # seed-library path.  Flag as degraded (STU-5).
-                    degraded = True
-                    degraded_reason = "provider unreachable, using seed library"
-                    try:
-                        profile, ws_session = runner.onboard(
-                            learner_id=name,
-                            age=age,
-                            domain=domain,
-                            topic=topic,
-                        )
-                    except ValueError:
-                        profile, ws_session = runner.onboard(
-                            learner_id=name,
-                            age=age,
-                            domain=Domain.US_HISTORY,
-                            topic=topic,
-                        )
-                        if domain != Domain.US_HISTORY:
-                            degraded_reason = (
-                                f"provider unreachable, using seed library; "
-                                f"domain changed from {original_domain.value} "
-                                f"to us_history (only seed domain available)"
-                            )
-                    if ws_session.phase == SessionPhase.CALIBRATING:
-                        runner.finish_calibration(profile, ws_session)
-            else:
-                # No topic: deterministic seed-library path.
-                profile, ws_session = runner.onboard(
-                    learner_id=name,
-                    age=age,
-                    domain=domain,
-                )
-                # Skip calibration for the WebSocket path — go
-                # straight to teaching so the client gets blocks.
-                if ws_session.phase == SessionPhase.CALIBRATING:
-                    runner.finish_calibration(profile, ws_session)
-
-            provider, model = router.for_task(TaskKind.SOCRATIC_DIALOGUE)
-            provider_name = type(provider).__name__.replace("Provider", "").lower()
-
-            # Send degraded notice before setup if applicable (STU-5)
-            if degraded:
-                await websocket.send_json({
-                    "type": "degraded",
-                    "reason": degraded_reason,
-                })
-
-            await websocket.send_json({
-                "type": "setup",
-                "topic": topic or domain.value,
-                "age_bracket": profile.age_bracket.value,
-                "provider": f"{provider_name}/{model}",
+                "message": str(exc),
             })
 
-            # 2. Teach loop
-            started_at = datetime.now(UTC)
-            while True:
-                directive = runner.next_directive(profile, ws_session)
 
-                if directive.phase in (SessionPhase.CLOSING, SessionPhase.CLOSED):
-                    break
+# ── App factory ──────────────────────────────────────────────────────
 
-                if directive.phase is SessionPhase.CRISIS_PAUSE:
-                    await websocket.send_json({
-                        "type": "crisis",
-                        "resources": directive.message or "Session paused.",
-                    })
-                    break
 
-                if directive.block is not None:
-                    block = directive.block
-                    await websocket.send_json({
-                        "type": "block",
-                        "title": block.title,
-                        "body": block.body,
-                        "modality": block.modality.value,
-                        "minutes": block.estimated_minutes,
-                    })
+def create_app() -> FastAPI:
+    """Build and return the FastAPI application."""
+    app = FastAPI(
+        title="Claw-STU",
+        description="Stuart — a personal learning agent that grows with the student.",
+        version=__version__,
+        lifespan=lifespan,
+    )
 
-                    # Wait for "ready" or "answer"
-                    raw_msg = await _receive_validated_json()
-                    if raw_msg is None:
-                        break
-                    if raw_msg.get("type") == "close":
-                        break
-
-                if ws_session.phase is SessionPhase.CHECKING:
-                    check_item = runner.select_check(ws_session)
-                    await websocket.send_json({
-                        "type": "check",
-                        "prompt": check_item.prompt,
-                        "item_id": check_item.id,
-                    })
-
-                    raw_answer = await _receive_validated_json()
-                    if raw_answer is None:
-                        break
-                    if raw_answer.get("type") == "close":
-                        break
-
-                    # Validate answer message (STU-7)
-                    try:
-                        answer_validated = WsAnswerMessage.model_validate(raw_answer)
-                        answer_text = answer_validated.text
-                    except ValidationError:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": "invalid message format",
-                        })
-                        break
-
-                    decision = gate.scan(answer_text)
-                    if decision.action == "crisis":
-                        ws_session.phase = SessionPhase.CRISIS_PAUSE
-                        assert decision.crisis_detection is not None
-                        resources = gate.escalation.resources(
-                            decision.crisis_detection
-                        )
-                        await websocket.send_json({
-                            "type": "crisis",
-                            "resources": resources,
-                        })
-                        break
-
-                    result = evaluator.evaluate(check_item, answer_text)
-                    runner.record_check(
-                        profile, ws_session, check_item, result,
-                    )
-                    await websocket.send_json({
-                        "type": "feedback",
-                        "correct": result.correct,
-                        "text": result.notes or (
-                            "Correct!" if result.correct else "Not quite."
-                        ),
-                    })
-
-            # 3. Send summary
-            runner.close(profile, ws_session)
-            elapsed = max(
-                1,
-                int(
-                    (datetime.now(UTC) - started_at).total_seconds() // 60
-                ),
-            )
-            await websocket.send_json({
-                "type": "summary",
-                "duration_minutes": elapsed,
-                "blocks": ws_session.blocks_presented,
-            })
-        except WebSocketDisconnect:
-            pass
-        except Exception as exc:
-            with contextlib.suppress(Exception):
-                await websocket.send_json({
-                    "type": "error",
-                    "message": str(exc),
-                })
+    _configure_cors(app)
+    _register_routes(app)
+    _mount_static(app)
+    _register_health_alias(app)
+    app.websocket("/ws/chat")(_websocket_chat)
 
     return app
 

@@ -238,6 +238,16 @@ description]". We treat these as P0.
 
 ---
 
+## Versioning
+
+Claw-ED and Claw-STU use date-aligned versioning: `M.DD.YYYY[.patch]`.
+The major number is the release month, the minor tracks the day/sprint,
+the year anchors the timeline, and the optional patch increments within
+a release. This keeps the two projects' versions aligned and makes the
+release timeline immediately visible.
+
+---
+
 ## Good First Issues
 
 Look for the [`good first issue`](https://github.com/SirhanMacx/Claw-STU/labels/good%20first%20issue)

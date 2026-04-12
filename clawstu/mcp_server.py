@@ -15,9 +15,12 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "Claw-STU",
@@ -53,6 +56,8 @@ def _resolve_learner_id(
 
         return most_recent_learner(persistence)
     except Exception:
+        logger.error("mcp_tool_call_failed", exc_info=True)
+        # MCP protocol requires a return; None signals failure to caller
         return None
 
 

@@ -790,7 +790,7 @@ def _parse_pathway(raw: str, domain: Domain) -> Pathway:
     try:
         return Pathway.model_validate_json(raw)
     except ValidationError:
-        pass
+        pass  # expected: raw is not strict JSON, try loose parse below
     data = _loads_object(raw)
     concepts_value = data.get("concepts", ())
     if isinstance(concepts_value, list):
@@ -812,7 +812,7 @@ def _parse_block(
     try:
         return LearningBlock.model_validate_json(raw)
     except ValidationError:
-        pass
+        pass  # expected: raw is not strict JSON, try loose parse below
     data = _loads_object(raw)
     return LearningBlock(
         domain=domain,
@@ -834,7 +834,7 @@ def _parse_check(
     try:
         return AssessmentItem.model_validate_json(raw)
     except ValidationError:
-        pass
+        pass  # expected: raw is not strict JSON, try loose parse below
     data = _loads_object(raw)
     rubric_value = data.get("rubric")
     rubric: tuple[str, ...] | None = None

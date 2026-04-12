@@ -46,12 +46,15 @@ skipped due to provider errors.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from clawstu.memory.pages import BrainPage
 from clawstu.memory.store import BrainStore
+
+logger = logging.getLogger(__name__)
 
 
 class Consolidator(Protocol):
@@ -147,6 +150,7 @@ async def dream_cycle(
                 user=prompt,
             )
         except Exception:
+            logger.warning("dream_cycle_learner_failed", exc_info=True)
             errors += 1
             continue
         if not _is_meaningful_change(page.compiled_truth, proposal):
