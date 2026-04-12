@@ -126,6 +126,11 @@ class TestWebSocketTopicOnboard:
                 "topic": "The French Revolution",
             })
             data = ws.receive_json()
+            # When the provider is unreachable, a degraded message is
+            # sent before setup. Accept either ordering.
+            if data["type"] == "degraded":
+                assert "reason" in data
+                data = ws.receive_json()
             assert data["type"] == "setup"
             assert "age_bracket" in data
 
@@ -142,6 +147,8 @@ class TestWebSocketTopicOnboard:
                 "topic": "Plate tectonics",
             })
             data = ws.receive_json()
+            if data["type"] == "degraded":
+                data = ws.receive_json()
             assert data["type"] == "setup"
 
     def test_ws_onboard_without_topic_still_works(

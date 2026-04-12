@@ -385,28 +385,66 @@ def doctor(
 
     if ping:
         typer.echo("  provider reachability:")
+        from clawstu.api.main import build_providers
+
+        providers = build_providers(cfg)
+        for name, provider in providers.items():
+            ptype = type(provider).__name__
+            typer.echo(f"    {name} ({ptype}): configured")
         typer.secho(
-            "    DEFERRED (Phase 2 wires the router + real connectivity checks)",
+            "    (experimental) Full connectivity ping deferred to a future release.",
             fg=typer.colors.YELLOW,
         )
     else:
         typer.echo("  provider reachability: skipped (pass --ping to try)")
-
-    typer.echo("  sqlite + FTS5: DEFERRED (Phase 3)")
-    typer.echo("  embeddings model: DEFERRED (Phase 4)")
 
 
 @scheduler_app.command("run-once")
 def scheduler_run_once(
     task: str = typer.Option(..., "--task", help="Task name to run."),
 ) -> None:
-    """Run one proactive task immediately (Phase 6)."""
+    """Run one proactive task immediately (experimental).
+
+    Constructs the scheduler runner and executes the named task once.
+    Requires the app state and provider keys to be configured.
+    """
+    import asyncio
+
+    from clawstu.api.main import build_scheduler_runner
+    from clawstu.api.state import AppState
+
     typer.echo(f"clawstu scheduler run-once --task {task}")
-    typer.secho(
-        "NOTE: the scheduler + task registry land in Phase 6. "
-        "This command is a placeholder in Phase 1.",
-        fg=typer.colors.YELLOW,
-    )
+    state = AppState()
+    try:
+        runner = build_scheduler_runner(state)
+    except Exception as exc:
+        typer.secho(f"  scheduler init failed: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    spec = runner.registry.get(task)
+    if spec is None:
+        typer.secho(f"  unknown task: {task!r}", fg=typer.colors.RED)
+        available = [s.name for s in runner.registry.list_all()]
+        typer.echo(f"  available tasks: {available}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"  running task: {spec.name} ...")
+
+    async def _run() -> None:
+        await runner.start()
+        try:
+            # Use the internal _run_spec method which is the
+            # same path APScheduler uses when firing a job.
+            await runner._run_spec(task)
+        finally:
+            await runner.stop()
+
+    try:
+        asyncio.run(_run())
+        typer.secho("  done.", fg=typer.colors.GREEN)
+    except Exception as exc:
+        typer.secho(f"  task failed: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
 
 
 @profile_app.command("export")

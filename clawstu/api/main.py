@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
-from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field, ValidationError
 from starlette.staticfiles import StaticFiles
 
 from clawstu import __version__
@@ -33,6 +36,44 @@ from clawstu.orchestrator.router import ModelRouter
 from clawstu.scheduler.context import ProactiveContext
 from clawstu.scheduler.registry import default_registry
 from clawstu.scheduler.runner import SchedulerRunner
+
+# ── WebSocket message models (STU-7) ───────────────────────────────
+
+class WsOnboardMessage(BaseModel):
+    type: Literal["onboard"]
+    name: str = Field(min_length=1, max_length=128)
+    age: int = Field(ge=5, le=120)
+    topic: str | None = Field(default=None, max_length=200)
+    domain: str | None = None
+
+
+class WsAnswerMessage(BaseModel):
+    type: Literal["answer"]
+    text: str = Field(min_length=1, max_length=2000)
+
+
+# ── Per-connection WebSocket rate limiter ──────────────────────────
+
+_WS_MAX_MESSAGES_PER_MINUTE = 30
+_WS_MAX_MESSAGE_SIZE = 4096  # 4KB
+
+
+class _WsRateLimiter:
+    """Per-connection message rate limiter for WebSocket connections."""
+
+    def __init__(self, max_per_minute: int = _WS_MAX_MESSAGES_PER_MINUTE) -> None:
+        self._max = max_per_minute
+        self._timestamps: list[float] = []
+
+    def check(self) -> bool:
+        """Return True if the message is allowed, False if rate-limited."""
+        now = time.time()
+        cutoff = now - 60.0
+        self._timestamps = [t for t in self._timestamps if t > cutoff]
+        if len(self._timestamps) >= self._max:
+            return False
+        self._timestamps.append(now)
+        return True
 
 
 def build_providers(cfg: AppConfig) -> dict[str, LLMProvider]:
@@ -140,7 +181,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     Spec reference: §4.7.6. The runner is stashed on `app.state` so
     the admin route can read it back via the FastAPI request scope.
+
+    Also validates auth configuration at startup: if STU_AUTH_MODE is
+    ``enforce`` and no token is set, the server exits immediately with
+    a clear error instead of accepting requests and failing at
+    request time.
     """
+    from clawstu.api.auth import validate_auth_on_startup
+
+    validate_auth_on_startup()
+
     state = get_state()
     runner = build_scheduler_runner(state)
     app.state.scheduler = runner
@@ -208,9 +258,10 @@ def create_app() -> FastAPI:
     # ``/admin/health``. This alias keeps both paths valid.
     @app.get("/health", response_model=admin.HealthResponse)
     def health_alias(
+        request: Request,
         state: AppState = Depends(get_state),
     ) -> admin.HealthResponse:
-        return admin.health(state)
+        return admin.health(request=request, state=state)
 
     # ── WebSocket live sessions ───────────────────────────────────────
     @app.websocket("/ws/chat")
@@ -230,27 +281,78 @@ def create_app() -> FastAPI:
           {"type": "feedback", "correct": bool, "text": "..."}
           {"type": "summary", "duration_minutes": N, "blocks": N}
           {"type": "error", "message": "..."}
+          {"type": "degraded", "reason": "..."}
           {"type": "crisis", "resources": "..."}
+
+        Auth: bearer token via ``?token=xxx`` query parameter. In dev
+        mode with no token configured, connections are allowed without
+        auth. Messages are rate-limited to 30/minute per connection and
+        max 4KB per message.
         """
+        import contextlib
         from datetime import UTC, datetime
 
+        import httpx
+
+        from clawstu.api.auth import validate_token
         from clawstu.assessment.evaluator import Evaluator
         from clawstu.engagement.session import SessionPhase, SessionRunner
-        from clawstu.orchestrator.live_content import LiveContentGenerator
+        from clawstu.orchestrator.live_content import LiveContentGenerator, LiveGenerationError
+        from clawstu.orchestrator.providers import ProviderError
         from clawstu.orchestrator.task_kinds import TaskKind
         from clawstu.profile.model import Domain
         from clawstu.safety.boundaries import BoundaryEnforcer
         from clawstu.safety.escalation import EscalationHandler
         from clawstu.safety.gate import InboundSafetyGate
 
+        # ── Auth check (STU-1) ─────────────────────────────────────
+        token = websocket.query_params.get("token")
+        if not validate_token(token):
+            # Must accept before sending a close frame with payload.
+            await websocket.accept()
+            await websocket.send_json({
+                "type": "error",
+                "message": "unauthorized",
+            })
+            await websocket.close(code=1008)
+            return
+
         await websocket.accept()
+
+        rate_limiter = _WsRateLimiter()
         gate = InboundSafetyGate(EscalationHandler(), BoundaryEnforcer())
         evaluator = Evaluator()
 
+        async def _receive_validated_json() -> dict[str, object] | None:
+            """Receive a JSON message with size + rate limit checks.
+
+            Returns None if rate-limited or oversized (error already
+            sent to the client).
+            """
+            raw = await websocket.receive_text()
+            if len(raw.encode("utf-8")) > _WS_MAX_MESSAGE_SIZE:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "message too large (max 4KB)",
+                })
+                return None
+            if not rate_limiter.check():
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "rate limit exceeded (max 30/minute)",
+                })
+                return None
+            import json
+            return json.loads(raw)
+
         try:
             # 1. Wait for onboard message
-            data: dict[str, object] = await websocket.receive_json()
-            if data.get("type") != "onboard":
+            raw_data = await _receive_validated_json()
+            if raw_data is None:
+                await websocket.close()
+                return
+
+            if raw_data.get("type") != "onboard":
                 await websocket.send_json({
                     "type": "error",
                     "message": "Expected onboard message first.",
@@ -258,12 +360,21 @@ def create_app() -> FastAPI:
                 await websocket.close()
                 return
 
-            name = str(data.get("name", "Learner"))
-            raw_age = data.get("age", 15)
-            age = int(str(raw_age))
-            topic_raw = data.get("topic")
-            topic = str(topic_raw) if topic_raw is not None else None
-            domain_raw = data.get("domain")
+            # Validate through pydantic model (STU-7)
+            try:
+                onboard_msg = WsOnboardMessage.model_validate(raw_data)
+            except ValidationError:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "invalid message format",
+                })
+                await websocket.close()
+                return
+
+            name = onboard_msg.name
+            age = onboard_msg.age
+            topic = onboard_msg.topic
+            domain_raw = onboard_msg.domain
             domain = Domain(str(domain_raw)) if domain_raw is not None else Domain.OTHER
 
             # Build session
@@ -272,6 +383,10 @@ def create_app() -> FastAPI:
             router = ModelRouter(config=cfg, providers=providers)
             live = LiveContentGenerator(router=router)
             runner = SessionRunner(live_content=live)
+
+            degraded = False
+            degraded_reason: str | None = None
+            original_domain = domain
 
             if topic is not None:
                 # Topic-aware path: live-content onboarding.  If the
@@ -287,11 +402,11 @@ def create_app() -> FastAPI:
                         domain=domain,
                         topic=topic,
                     )
-                except Exception:
-                    # Fall back to the sync seed-library path.
-                    # US_HISTORY is the only domain with a full seed
-                    # pathway; try the requested domain first, then
-                    # US_HISTORY if that fails.
+                except (ConnectionError, TimeoutError, httpx.HTTPError, ValueError, OSError, ProviderError, LiveGenerationError):
+                    # Provider unreachable — fall back to the sync
+                    # seed-library path.  Flag as degraded (STU-5).
+                    degraded = True
+                    degraded_reason = "provider unreachable, using seed library"
                     try:
                         profile, ws_session = runner.onboard(
                             learner_id=name,
@@ -306,6 +421,12 @@ def create_app() -> FastAPI:
                             domain=Domain.US_HISTORY,
                             topic=topic,
                         )
+                        if domain != Domain.US_HISTORY:
+                            degraded_reason = (
+                                f"provider unreachable, using seed library; "
+                                f"domain changed from {original_domain.value} "
+                                f"to us_history (only seed domain available)"
+                            )
                     if ws_session.phase == SessionPhase.CALIBRATING:
                         runner.finish_calibration(profile, ws_session)
             else:
@@ -322,6 +443,13 @@ def create_app() -> FastAPI:
 
             provider, model = router.for_task(TaskKind.SOCRATIC_DIALOGUE)
             provider_name = type(provider).__name__.replace("Provider", "").lower()
+
+            # Send degraded notice before setup if applicable (STU-5)
+            if degraded:
+                await websocket.send_json({
+                    "type": "degraded",
+                    "reason": degraded_reason,
+                })
 
             await websocket.send_json({
                 "type": "setup",
@@ -356,8 +484,10 @@ def create_app() -> FastAPI:
                     })
 
                     # Wait for "ready" or "answer"
-                    msg: dict[str, object] = await websocket.receive_json()
-                    if msg.get("type") == "close":
+                    raw_msg = await _receive_validated_json()
+                    if raw_msg is None:
+                        break
+                    if raw_msg.get("type") == "close":
                         break
 
                 if ws_session.phase is SessionPhase.CHECKING:
@@ -368,11 +498,23 @@ def create_app() -> FastAPI:
                         "item_id": check_item.id,
                     })
 
-                    answer_msg: dict[str, object] = await websocket.receive_json()
-                    if answer_msg.get("type") == "close":
+                    raw_answer = await _receive_validated_json()
+                    if raw_answer is None:
+                        break
+                    if raw_answer.get("type") == "close":
                         break
 
-                    answer_text = str(answer_msg.get("text", ""))
+                    # Validate answer message (STU-7)
+                    try:
+                        answer_validated = WsAnswerMessage.model_validate(raw_answer)
+                        answer_text = answer_validated.text
+                    except ValidationError:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "invalid message format",
+                        })
+                        break
+
                     decision = gate.scan(answer_text)
                     if decision.action == "crisis":
                         ws_session.phase = SessionPhase.CRISIS_PAUSE
@@ -414,8 +556,6 @@ def create_app() -> FastAPI:
         except WebSocketDisconnect:
             pass
         except Exception as exc:
-            import contextlib
-
             with contextlib.suppress(Exception):
                 await websocket.send_json({
                     "type": "error",

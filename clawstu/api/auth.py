@@ -11,18 +11,18 @@ Auth modes (controlled by ``STU_AUTH_MODE`` env var):
 
 * **enforce** — a token *must* be set via ``STU_LEARNER_AUTH_TOKEN``.
   Requests without a valid ``Authorization: Bearer <token>`` header
-  get HTTP 401.  This is the default when the server binds to a
-  non-loopback address.
+  get HTTP 401.  Production deployments MUST set ``STU_AUTH_MODE=enforce``
+  (or ``generate``) explicitly.
 * **generate** — auto-create a cryptographically random token on first
-  startup, save it to ``~/.claw-stu/api_token`` (0600), and print it
-  once to stderr so the operator can configure clients.
+  startup, save it to ``~/.claw-stu/api_token`` (0600), and log it
+  once so the operator can configure clients.
 * **dev** — original behaviour.  If ``STU_LEARNER_AUTH_TOKEN`` is
   unset, the dependency is a no-op.  Suitable for local loopback
   development only.
 
-When ``STU_AUTH_MODE`` is *not* set the default is ``dev`` for
-localhost-bound processes and ``enforce`` otherwise, matching the
-principle-of-least-surprise for production deployments.
+When ``STU_AUTH_MODE`` is *not* set the default is ``dev``.
+Production deployments MUST set ``STU_AUTH_MODE=enforce`` or
+``STU_AUTH_MODE=generate`` explicitly.
 
 The ``learner_id`` path parameter is accepted so the dependency can be
 attached to routes shaped ``/learners/{learner_id}/...``, but it is
@@ -36,7 +36,6 @@ import logging
 import os
 import secrets
 import stat
-import sys
 from pathlib import Path
 
 from fastapi import Header, HTTPException
@@ -57,15 +56,21 @@ _VALID_MODES = frozenset({"enforce", "generate", "dev"})
 
 
 def _resolve_mode() -> str:
-    """Determine the auth mode from env vars and bind address."""
+    """Determine the auth mode from the ``STU_AUTH_MODE`` env var.
+
+    Resolution order:
+    1. ``STU_AUTH_MODE`` if explicitly set to a valid mode.
+    2. Default to ``dev`` (safe for local development).
+
+    Production deployments MUST set ``STU_AUTH_MODE=enforce`` or
+    ``STU_AUTH_MODE=generate`` explicitly. We no longer sniff
+    ``UVICORN_HOST`` because that is fragile and unreliable when
+    behind reverse proxies or inside containers.
+    """
     explicit = os.environ.get(_MODE_ENV_VAR, "").strip().lower()
     if explicit in _VALID_MODES:
         return explicit
-    # No explicit mode: default to dev when the server is localhost.
-    host = os.environ.get("UVICORN_HOST", "127.0.0.1")
-    if host in ("127.0.0.1", "::1", "localhost"):
-        return "dev"
-    return "enforce"
+    return "dev"
 
 
 def _get_or_generate_token() -> str:
@@ -89,11 +94,9 @@ def _get_or_generate_token() -> str:
             "Could not set 0600 on %s — verify permissions manually",
             _TOKEN_FILE,
         )
-    # Print once so the operator can copy it.
-    print(
-        f"\n  Stuart API token (saved to {_TOKEN_FILE}):\n"
-        f"  {token}\n",
-        file=sys.stderr,
+    # Log once so the operator can copy it.
+    logger.info(
+        "Stuart API token (saved to %s): %s", _TOKEN_FILE, token,
     )
     return token
 
@@ -141,3 +144,82 @@ def require_learner_auth(
     presented = authorization[len(_BEARER_PREFIX):]
     if not secrets.compare_digest(presented, expected):
         raise HTTPException(status_code=401, detail="unauthorized")
+
+
+def require_auth(
+    authorization: str | None = Header(default=None),
+) -> None:
+    """FastAPI dependency that gates routes on a bearer token.
+
+    Same logic as ``require_learner_auth`` but without a ``learner_id``
+    path parameter, making it suitable for routes that don't have one
+    (session, profile, admin/scheduler).
+    """
+    mode = _resolve_mode()
+
+    if mode == "dev":
+        expected = os.environ.get(_AUTH_ENV_VAR, "").strip()
+        if not expected:
+            return  # Dev mode — no auth configured.
+    elif mode == "generate":
+        expected = _get_or_generate_token()
+    else:
+        # enforce
+        expected = os.environ.get(_AUTH_ENV_VAR, "").strip()
+        if not expected:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Server misconfigured: STU_AUTH_MODE=enforce but "
+                    "STU_LEARNER_AUTH_TOKEN is not set."
+                ),
+            )
+
+    if authorization is None or not authorization.startswith(_BEARER_PREFIX):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    presented = authorization[len(_BEARER_PREFIX):]
+    if not secrets.compare_digest(presented, expected):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+def validate_token(token: str | None) -> bool:
+    """Check a raw bearer token value against the expected token.
+
+    Used for WebSocket auth where tokens arrive via query params
+    instead of HTTP headers. Returns True if the token is valid,
+    False otherwise. In dev mode with no token set, returns True.
+    """
+    mode = _resolve_mode()
+
+    if mode == "dev":
+        expected = os.environ.get(_AUTH_ENV_VAR, "").strip()
+        if not expected:
+            return True  # Dev mode — no auth configured.
+    elif mode == "generate":
+        expected = _get_or_generate_token()
+    else:
+        # enforce
+        expected = os.environ.get(_AUTH_ENV_VAR, "").strip()
+        if not expected:
+            return False  # Misconfigured — reject.
+
+    if token is None:
+        return False
+    return secrets.compare_digest(token, expected)
+
+
+def validate_auth_on_startup() -> None:
+    """Validate that auth is correctly configured at startup.
+
+    Call from the app lifespan. If mode is ``enforce`` and no token is
+    set, raises ``SystemExit`` with a clear error BEFORE the server
+    starts accepting requests.
+    """
+    mode = _resolve_mode()
+    if mode == "enforce":
+        expected = os.environ.get(_AUTH_ENV_VAR, "").strip()
+        if not expected:
+            raise SystemExit(
+                "FATAL: STU_AUTH_MODE=enforce but STU_LEARNER_AUTH_TOKEN "
+                "is not set. Set the token or use STU_AUTH_MODE=generate."
+            )

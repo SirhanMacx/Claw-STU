@@ -4,6 +4,9 @@ Modeled on Claw-ED's ``clawed.api.deps._RateLimiter`` for cross-repo
 consistency. No external dependencies: timestamps are stored in a
 plain dict, pruned every 100th request to prevent memory leaks.
 
+In-memory per-process limiter. For multi-process or distributed
+deployments, replace with a shared backend (Redis, etc.).
+
 Usage::
 
     from clawstu.api.rate_limit import limiter

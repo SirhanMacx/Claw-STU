@@ -8,12 +8,17 @@ auth story.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from clawstu import __version__
+from clawstu.api.auth import require_auth
 from clawstu.api.state import AppState, get_state
 from clawstu.scheduler.runner import SchedulerRunner
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -23,20 +28,63 @@ class HealthResponse(BaseModel):
     version: str
     invariants: dict[str, bool]
     active_sessions: int
+    details: dict[str, str] | None = None
 
 
 @router.get("/health", response_model=HealthResponse)
-def health(state: AppState = Depends(get_state)) -> HealthResponse:
-    invariants = {
-        "soul_md_loaded": True,
-        "safety_filters_active": True,
-    }
+def health(
+    request: Request,
+    state: AppState = Depends(get_state),
+) -> HealthResponse:
+    """Health check endpoint. Stays public for load balancers.
+
+    Performs real checks:
+    1. Config loads successfully
+    2. Persistence store is accessible
+    3. Scheduler is running (if attached)
+    """
+    from clawstu.orchestrator.config import load_config
+
+    invariants: dict[str, bool] = {}
+    details: dict[str, str] = {}
+
+    # Check 1: config loads
+    try:
+        load_config()
+        invariants["config_loads"] = True
+    except Exception as exc:
+        invariants["config_loads"] = False
+        details["config_error"] = str(exc)
+        logger.warning("Health check: config load failed: %s", exc)
+
+    # Check 2: persistence store accessible
+    try:
+        # Simple read to verify persistence is working.
+        state.persistence.learners.get("__health_check_probe__")
+        invariants["persistence_accessible"] = True
+    except Exception as exc:
+        invariants["persistence_accessible"] = False
+        details["persistence_error"] = str(exc)
+        logger.warning("Health check: persistence read failed: %s", exc)
+
+    # Check 3: scheduler status
+    runner = getattr(request.app.state, "scheduler", None)
+    if isinstance(runner, SchedulerRunner):
+        invariants["scheduler_running"] = True
+    else:
+        invariants["scheduler_running"] = False
+        details["scheduler"] = "not initialized"
+
+    # Static invariants
+    invariants["safety_filters_active"] = True
+
     degraded = any(value is False for value in invariants.values())
     return HealthResponse(
         status="degraded" if degraded else "ok",
         version=__version__,
         invariants=invariants,
         active_sessions=len(state.sessions),
+        details=details if details else None,
     )
 
 
@@ -96,7 +144,10 @@ def _coerce_int(value: object) -> int:
 
 
 @router.get("/scheduler", response_model=SchedulerStatusResponse)
-def scheduler_status(request: Request) -> SchedulerStatusResponse:
+def scheduler_status(
+    request: Request,
+    _auth: None = Depends(require_auth),
+) -> SchedulerStatusResponse:
     """Return registered tasks plus the 50 most-recent run records.
 
     The runner is stashed on `app.state.scheduler` by the lifespan

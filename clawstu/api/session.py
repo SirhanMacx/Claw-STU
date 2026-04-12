@@ -25,6 +25,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from clawstu.api.auth import require_auth
 from clawstu.api.rate_limit import limiter
 from clawstu.api.state import AppState, SessionBundle, get_state
 from clawstu.assessment.evaluator import EvaluationResult, Evaluator
@@ -57,6 +58,8 @@ class OnboardResponse(BaseModel):
     session_id: str
     phase: SessionPhase
     calibration_items: tuple[AssessmentItem, ...]
+    degraded: bool = False
+    degraded_reason: str | None = None
 
 
 class AnswerRequest(BaseModel):
@@ -158,8 +161,18 @@ def _halt_for_boundary(decision: InboundDecision) -> HTTPException:
 async def onboard(
     request: OnboardRequest,
     http_request: Request,
+    _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> OnboardResponse:
+    import httpx
+
+    from clawstu.orchestrator.live_content import LiveGenerationError
+    from clawstu.orchestrator.providers import ProviderError
+
+    degraded = False
+    degraded_reason: str | None = None
+    original_domain = request.domain
+
     try:
         if request.topic is not None:
             # Topic-aware path: use the live-content generator so
@@ -180,12 +193,11 @@ async def onboard(
                     topic=request.topic,
                     live_content_override=live,
                 )
-            except Exception:
+            except (ConnectionError, TimeoutError, httpx.HTTPError, ValueError, OSError, ProviderError, LiveGenerationError):
                 # Provider unreachable — fall back to the sync
-                # seed-library path.  Use US_HISTORY when the
-                # requested domain has no seed pathway (OTHER,
-                # SCIENCE, etc.) since US_HISTORY is the only
-                # domain with a full deterministic content set.
+                # seed-library path.  Flag as degraded (STU-5).
+                degraded = True
+                degraded_reason = "provider unreachable, using seed library"
                 try:
                     profile, session = state.runner.onboard(
                         learner_id=request.learner_id,
@@ -200,6 +212,12 @@ async def onboard(
                         domain=Domain.US_HISTORY,
                         topic=request.topic,
                     )
+                    if original_domain != Domain.US_HISTORY:
+                        degraded_reason = (
+                            f"provider unreachable, using seed library; "
+                            f"domain changed from {original_domain.value} "
+                            f"to us_history (only seed domain available)"
+                        )
         else:
             # No topic: deterministic seed-library path with calibration.
             profile, session = state.runner.onboard(
@@ -217,12 +235,15 @@ async def onboard(
         session_id=session.id,
         phase=session.phase,
         calibration_items=items,
+        degraded=degraded,
+        degraded_reason=degraded_reason,
     )
 
 
 @router.get("/{session_id}", response_model=Session)
 def get_session(
     session_id: str,
+    _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> Session:
     return _bundle(state, session_id).session
@@ -234,6 +255,7 @@ async def submit_calibration_answer(
     session_id: str,
     request: AnswerRequest,
     http_request: Request,
+    _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> AnswerResponse:
     bundle = _bundle(state, session_id)
@@ -277,6 +299,7 @@ async def submit_calibration_answer(
 @router.post("/{session_id}/finish-calibration", response_model=DirectiveResponse)
 def finish_calibration(
     session_id: str,
+    _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> DirectiveResponse:
     bundle = _bundle(state, session_id)
@@ -290,6 +313,7 @@ def finish_calibration(
 async def next_directive(
     session_id: str,
     http_request: Request,
+    _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> DirectiveResponse:
     bundle = _bundle(state, session_id)
@@ -303,6 +327,7 @@ async def submit_check_answer(
     session_id: str,
     request: AnswerRequest,
     http_request: Request,
+    _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> DirectiveResponse:
     bundle = _bundle(state, session_id)
@@ -348,6 +373,7 @@ async def socratic(
     session_id: str,
     request: SocraticRequest,
     http_request: Request,
+    _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> SocraticResponse:
     """Ad-hoc student question routed through the safety gate and the
@@ -454,6 +480,7 @@ def _adapt_session_for_memory(
 @router.post("/{session_id}/close", response_model=CloseResponse)
 def close_session(
     session_id: str,
+    _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> CloseResponse:
     bundle = _bundle(state, session_id)

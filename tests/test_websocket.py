@@ -39,6 +39,11 @@ def test_websocket_onboard_returns_setup(client: TestClient) -> None:
             "topic": "Testing",
         })
         data = ws.receive_json()
+        # When the provider is unreachable, a degraded message is
+        # sent before setup. Accept either ordering.
+        if data["type"] == "degraded":
+            assert "reason" in data
+            data = ws.receive_json()
         assert data["type"] == "setup"
         assert data["topic"] == "Testing"
         assert "age_bracket" in data
@@ -55,6 +60,8 @@ def test_websocket_close_sends_summary(client: TestClient) -> None:
             "topic": "Math basics",
         })
         setup = ws.receive_json()
+        if setup["type"] == "degraded":
+            setup = ws.receive_json()
         assert setup["type"] == "setup"
 
         # There should be a block or check after setup

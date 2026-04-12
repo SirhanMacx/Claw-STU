@@ -647,11 +647,11 @@ def _iter_learner_ids(
 ) -> list[str]:
     """List learner ids in the store.
 
-    Minimal helper that pokes the private ``_rows`` on the learner
-    store. Same pattern as ``cli_state._iter_learners`` but returns
-    only the id list -- kept separate so ``run_ask`` doesn't import
-    from ``cli_state._iter_learners`` (which is not exported).
+    Uses the public ``list_all`` method on the learner store when
+    available, falling back to ``_rows`` for older store versions.
     """
+    if hasattr(store.learners, "list_all"):
+        return [p.learner_id for p in store.learners.list_all()]
     raw: object = getattr(store.learners, "_rows", {})
     if not isinstance(raw, dict):
         return []
@@ -732,7 +732,7 @@ def run_profile_export(
         from clawstu.memory.store import _learner_hash
 
         brain_subdir = (
-            bundle.brain_store._base / _learner_hash(resolved.learner_id)
+            bundle.brain_store.base_dir / _learner_hash(resolved.learner_id)
         )
         brain_dest = staging / "brain"
         if brain_subdir.exists():
@@ -791,10 +791,56 @@ def run_profile_import(
         typer.secho(f"not a tarball: {source}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
+    _TAR_MAX_MEMBERS = 1000
+    _TAR_MAX_TOTAL_SIZE = 100 * 1024 * 1024  # 100MB
+
     with tempfile.TemporaryDirectory() as td:
         extract_dir = _Path(td) / "extracted"
         extract_dir.mkdir()
         with tarfile.open(str(source), "r:gz") as tar:
+            members = tar.getmembers()
+
+            # Limit member count to prevent zip bombs.
+            if len(members) > _TAR_MAX_MEMBERS:
+                typer.secho(
+                    f"tarball has {len(members)} members "
+                    f"(max {_TAR_MAX_MEMBERS})",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(code=1)
+
+            # Validate paths and total size before extracting.
+            total_size = 0
+            for member in members:
+                # Path traversal protection: reject members with
+                # ".." components or absolute paths.
+                member_path = _Path(member.name)
+                if member.name.startswith("/") or ".." in member_path.parts:
+                    typer.secho(
+                        f"tarball contains unsafe path: {member.name!r}",
+                        fg=typer.colors.RED,
+                    )
+                    raise typer.Exit(code=1)
+                # Verify extraction stays within target directory.
+                resolved = (extract_dir / member.name).resolve()
+                if not str(resolved).startswith(
+                    str(extract_dir.resolve())
+                ):
+                    typer.secho(
+                        f"tarball path escapes target: {member.name!r}",
+                        fg=typer.colors.RED,
+                    )
+                    raise typer.Exit(code=1)
+                total_size += member.size
+
+            if total_size > _TAR_MAX_TOTAL_SIZE:
+                typer.secho(
+                    f"tarball total extracted size {total_size} bytes "
+                    f"exceeds max {_TAR_MAX_TOTAL_SIZE} bytes (100MB)",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(code=1)
+
             tar.extractall(path=str(extract_dir), filter="data")
 
         # Validate meta.json.
@@ -873,7 +919,7 @@ def run_profile_import(
         brain_src = extract_dir / "brain"
         if brain_src.exists() and any(brain_src.iterdir()):
             brain_dest = (
-                bundle.brain_store._base / _learner_hash(learner_id)
+                bundle.brain_store.base_dir / _learner_hash(learner_id)
             )
             if brain_dest.exists():
                 shutil.rmtree(brain_dest)
@@ -893,24 +939,18 @@ def run_profile_import(
 def _iter_events_for_export(
     persistence: InMemoryPersistentStore, learner_id: str,
 ) -> list[dict[str, object]]:
-    """Return events as envelope dicts for JSONL serialization."""
+    """Return events as envelope dicts for JSONL serialization.
 
-    raw: object = getattr(persistence.events, "_rows", [])
-    if not isinstance(raw, list):
-        return []
+    Uses the public ``list_for_learner`` API when available to avoid
+    accessing private store attributes.
+    """
+    events = persistence.events.list_for_learner(learner_id)
     out: list[dict[str, object]] = []
-    for row in raw:
-        if not (isinstance(row, tuple) and len(row) == 3):
-            continue
-        lid, sid, event = row
-        if lid != learner_id:
-            continue
-        if not isinstance(event, ObservationEvent):
-            continue
+    for event in events:
         out.append(
             {
-                "learner_id": lid,
-                "session_id": sid if isinstance(sid, str) else None,
+                "learner_id": learner_id,
+                "session_id": None,
                 "event": event.model_dump(mode="json"),
             }
         )

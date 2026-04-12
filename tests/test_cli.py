@@ -149,19 +149,18 @@ def test_doctor_accepts_ping_flag() -> None:
     )
 
 
-def test_doctor_with_ping_prints_deferred_note(
+def test_doctor_with_ping_prints_provider_status(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """With --ping, Phase 1 still prints a DEFERRED note (real
-    reachability check lands in Phase 2). This test pins the
-    behavior so anyone who implements real pings has to update it.
+    """With --ping, doctor lists configured providers and an
+    experimental note for full connectivity pings.
     """
     monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
     result = runner.invoke(app, ["doctor", "--ping"])
     assert result.exit_code == 0, result.stdout
     stdout = _plain(result.stdout)
     assert "provider reachability" in stdout
-    assert "DEFERRED" in stdout
+    assert "experimental" in stdout.lower()
 
 
 def test_setup_command_exists_in_help() -> None:

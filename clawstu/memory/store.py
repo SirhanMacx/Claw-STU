@@ -126,6 +126,11 @@ class BrainStore:
     def __init__(self, base_dir: Path) -> None:
         self._base = base_dir
 
+    @property
+    def base_dir(self) -> Path:
+        """Return the root directory of the brain store."""
+        return self._base
+
     # -- paths ---------------------------------------------------------
 
     def _target_path(
