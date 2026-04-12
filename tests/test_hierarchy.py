@@ -93,7 +93,8 @@ _ALLOWED: dict[str, frozenset[str]] = {
     "scheduler": frozenset(
         {"orchestrator", "memory", "persistence", "engagement", "profile"}
     ),
-    # cli is effectively api-layer (top); allow everything.
+    # cli is effectively api-layer (top); allow everything plus the
+    # top-level setup_wizard sibling module.
     "_cli": frozenset(
         {
             "safety",
@@ -106,6 +107,21 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "persistence",
             "api",
             "scheduler",
+            "setup_wizard",
+        }
+    ),
+    # setup_wizard is a sibling of cli.py — also a top-level module.
+    # It needs orchestrator (config + providers) for verification, but
+    # nothing higher up (no api/persistence/scheduler dependency) to
+    # keep `clawstu setup` import-cheap and side-effect-free.
+    "setup_wizard": frozenset(
+        {
+            "orchestrator",
+            "profile",
+            "safety",
+            "memory",
+            "curriculum",
+            "assessment",
         }
     ),
 }

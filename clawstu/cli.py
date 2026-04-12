@@ -6,6 +6,7 @@ already exist in clawstu.api, clawstu.orchestrator, or (Phase 4+)
 clawstu.memory / clawstu.scheduler.
 
 Commands:
+  clawstu setup                              interactive provider wizard
   clawstu serve                              start the FastAPI app
   clawstu doctor                             self-diagnosis
   clawstu scheduler run-once --task <name>   run a proactive task once
@@ -15,6 +16,8 @@ Commands:
 from __future__ import annotations
 
 import typer
+
+from clawstu.setup_wizard import SetupError, run_setup
 
 app: typer.Typer = typer.Typer(
     name="clawstu",
@@ -30,6 +33,64 @@ scheduler_app: typer.Typer = typer.Typer(help="Proactive-scheduler administratio
 profile_app: typer.Typer = typer.Typer(help="Learner profile portability.")
 app.add_typer(scheduler_app, name="scheduler")
 app.add_typer(profile_app, name="profile")
+
+
+@app.command()
+def setup(
+    interactive: bool = typer.Option(
+        True,
+        "--interactive/--no-interactive",
+        help=(
+            "Run the wizard in interactive mode (default). "
+            "--no-interactive runs without prompts using --provider "
+            "(and --api-key for non-echo providers); intended for "
+            "scripted deployments and CI."
+        ),
+    ),
+    provider: str | None = typer.Option(
+        None,
+        "--provider",
+        help=(
+            "Provider name to write without prompting. One of: "
+            "anthropic, openai, openrouter, ollama, echo. Required "
+            "when --no-interactive is set."
+        ),
+    ),
+    api_key: str | None = typer.Option(
+        None,
+        "--api-key",
+        help=(
+            "API key for the chosen provider. Required when using "
+            "--no-interactive with anthropic, openai, or openrouter."
+        ),
+    ),
+    base_url: str | None = typer.Option(
+        None,
+        "--base-url",
+        help=(
+            "Override the provider's base URL. Mainly useful for "
+            "Ollama or self-hosted gateways."
+        ),
+    ),
+) -> None:
+    """Interactive provider setup -- pick a provider, save the API key.
+
+    Walks the operator through provider selection, captures an API key
+    (or local Ollama base URL), runs a tiny verification ping, and
+    writes the result to ``~/.claw-stu/secrets.json`` with 0600 perms.
+
+    Pass ``--no-interactive --provider <name>`` for scripted use.
+    """
+    try:
+        run_setup(
+            interactive=interactive,
+            provider_override=provider,
+            api_key_override=api_key,
+            base_url_override=base_url,
+        )
+    except SetupError as exc:
+        typer.secho(f"setup failed: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()

@@ -1,6 +1,7 @@
 """Tests for the clawstu CLI entry point."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -119,3 +120,41 @@ def test_doctor_with_ping_prints_deferred_note(
     stdout = _plain(result.stdout)
     assert "provider reachability" in stdout
     assert "DEFERRED" in stdout
+
+
+def test_setup_command_exists_in_help() -> None:
+    """`clawstu setup --help` returns 0 and mentions the wizard."""
+    result = runner.invoke(app, ["setup", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    # The help body should at least describe the wizard's purpose.
+    assert "setup" in stdout.lower()
+    assert "provider" in stdout.lower()
+
+
+def test_setup_command_runs_in_echo_only_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """`clawstu setup --no-interactive --provider echo` writes secrets.json."""
+    # Isolate the data dir + clear ambient credentials so the wizard's
+    # load_config sees the bare default it expects from a clean install.
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "OLLAMA_API_KEY",
+        "OLLAMA_BASE_URL",
+        "STU_PRIMARY_PROVIDER",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(
+        app,
+        ["setup", "--no-interactive", "--provider", "echo"],
+    )
+    assert result.exit_code == 0, result.stdout
+    secrets = tmp_path / "secrets.json"
+    assert secrets.exists(), "wizard did not write secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload == {"primary_provider": "echo"}
