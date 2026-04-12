@@ -1,0 +1,17 @@
+services:
+  stuart:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - stuart-data:/data/.claw-stu
+    environment:
+      - CLAW_STU_DATA_DIR=/data/.claw-stu
+      # Pass provider keys via env
+      # - ANTHROPIC_API_KEY=sk-ant-...
+      # - OPENAI_API_KEY=sk-...
+      # - GOOGLE_API_KEY=AIza...
+      # - OLLAMA_BASE_URL=http://host.docker.internal:11434
+
+volumes:
+  stuart-data:
