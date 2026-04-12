@@ -30,6 +30,9 @@ from clawstu.assessment.evaluator import EvaluationResult, Evaluator
 from clawstu.assessment.generator import AssessmentItem
 from clawstu.engagement.session import Session, SessionDirective, SessionPhase
 from clawstu.memory.writer import SessionSnapshot, write_session_to_memory
+from clawstu.orchestrator.config import load_config
+from clawstu.orchestrator.live_content import LiveContentGenerator
+from clawstu.orchestrator.router import ModelRouter
 from clawstu.profile.model import Domain, EventKind, LearnerProfile
 from clawstu.safety.boundaries import BoundaryEnforcer
 from clawstu.safety.escalation import EscalationHandler
@@ -42,10 +45,10 @@ class OnboardRequest(BaseModel):
     learner_id: str = Field(min_length=1, max_length=128)
     age: int = Field(ge=5, le=120)
     domain: Domain
-    # Phase 5: optional free-text topic. If present, the handler stores
-    # it on the session via the sync `runner.onboard(topic=...)` path.
-    # The live-content `onboard_with_topic` path lands in a later phase
-    # (it needs the orchestrator wired to the app-state).
+    # Optional free-text topic. When present, the handler uses the async
+    # `onboard_with_topic` path to generate a live pathway via the LLM.
+    # When absent, the sync `runner.onboard()` path runs deterministic
+    # seed-library calibration.
     topic: str | None = Field(default=None, max_length=200)
 
 
@@ -150,21 +153,50 @@ def _halt_for_boundary(decision: InboundDecision) -> HTTPException:
 
 
 @router.post("", response_model=OnboardResponse, status_code=201)
-def onboard(
+async def onboard(
     request: OnboardRequest,
     state: AppState = Depends(get_state),
 ) -> OnboardResponse:
     try:
-        profile, session = state.runner.onboard(
-            learner_id=request.learner_id,
-            age=request.age,
-            domain=request.domain,
-            topic=request.topic,
-        )
+        if request.topic is not None:
+            # Topic-aware path: use the live-content generator so
+            # arbitrary topics go through the LLM-backed pathway.
+            # If the provider is unreachable, fall back to the sync
+            # path so the session still starts with the topic stored.
+            from clawstu.api.main import build_providers
+
+            cfg = load_config()
+            providers = build_providers(cfg)
+            router = ModelRouter(config=cfg, providers=providers)
+            live = LiveContentGenerator(router=router)
+            try:
+                profile, session = await state.runner.onboard_with_topic(
+                    learner_id=request.learner_id,
+                    age=request.age,
+                    domain=request.domain,
+                    topic=request.topic,
+                    live_content_override=live,
+                )
+            except Exception:
+                profile, session = state.runner.onboard(
+                    learner_id=request.learner_id,
+                    age=request.age,
+                    domain=request.domain,
+                    topic=request.topic,
+                )
+        else:
+            # No topic: deterministic seed-library path with calibration.
+            profile, session = state.runner.onboard(
+                learner_id=request.learner_id,
+                age=request.age,
+                domain=request.domain,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     state.put(SessionBundle(profile=profile, session=session))
-    items = state.runner.calibration_items(session)
+    items: tuple[AssessmentItem, ...] = ()
+    if session.phase is SessionPhase.CALIBRATING:
+        items = state.runner.calibration_items(session)
     return OnboardResponse(
         session_id=session.id,
         phase=session.phase,

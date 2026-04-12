@@ -236,7 +236,10 @@ def create_app() -> FastAPI:
             name = str(data.get("name", "Learner"))
             raw_age = data.get("age", 15)
             age = int(str(raw_age))
-            topic = str(data.get("topic", "general"))
+            topic_raw = data.get("topic")
+            topic = str(topic_raw) if topic_raw is not None else None
+            domain_raw = data.get("domain")
+            domain = Domain(str(domain_raw)) if domain_raw is not None else Domain.OTHER
 
             # Build session
             cfg = load_config()
@@ -245,26 +248,50 @@ def create_app() -> FastAPI:
             live = LiveContentGenerator(router=router)
             runner = SessionRunner(live_content=live)
 
-            # Use sync onboard as the reliable path — the async
-            # onboard_with_topic hits the LLM which may be unavailable.
-            # US_HISTORY is the only domain with a seed pathway.
-            profile, ws_session = runner.onboard(
-                learner_id=name,
-                age=age,
-                domain=Domain.US_HISTORY,
-                topic=topic,
-            )
-            # Skip calibration for the WebSocket path — go
-            # straight to teaching so the client gets blocks.
-            if ws_session.phase == SessionPhase.CALIBRATING:
-                runner.finish_calibration(profile, ws_session)
+            if topic is not None:
+                # Topic-aware path: live-content onboarding.  If the
+                # provider is unreachable (e.g. no Ollama daemon in
+                # tests), fall back to the sync path so the session
+                # still starts.  The fallback uses US_HISTORY because
+                # it is the only domain with seed pathways in the
+                # deterministic content library.
+                try:
+                    profile, ws_session = await runner.onboard_with_topic(
+                        learner_id=name,
+                        age=age,
+                        domain=domain,
+                        topic=topic,
+                    )
+                except Exception:
+                    fallback_domain = (
+                        domain if domain is not Domain.OTHER else Domain.US_HISTORY
+                    )
+                    profile, ws_session = runner.onboard(
+                        learner_id=name,
+                        age=age,
+                        domain=fallback_domain,
+                        topic=topic,
+                    )
+                    if ws_session.phase == SessionPhase.CALIBRATING:
+                        runner.finish_calibration(profile, ws_session)
+            else:
+                # No topic: deterministic seed-library path.
+                profile, ws_session = runner.onboard(
+                    learner_id=name,
+                    age=age,
+                    domain=domain,
+                )
+                # Skip calibration for the WebSocket path — go
+                # straight to teaching so the client gets blocks.
+                if ws_session.phase == SessionPhase.CALIBRATING:
+                    runner.finish_calibration(profile, ws_session)
 
             provider, model = router.for_task(TaskKind.SOCRATIC_DIALOGUE)
             provider_name = type(provider).__name__.replace("Provider", "").lower()
 
             await websocket.send_json({
                 "type": "setup",
-                "topic": topic,
+                "topic": topic or domain.value,
                 "age_bracket": profile.age_bracket.value,
                 "provider": f"{provider_name}/{model}",
             })
