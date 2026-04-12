@@ -78,7 +78,10 @@ def test_dependencies_include_all_runtime_essentials() -> None:
     pyproject = _load_pyproject()
     deps = pyproject["project"]["dependencies"]
     dep_names = {_dep_name(d) for d in deps}
-    # Every dep that Phase 1 runtime code actually imports:
+    # Every dep that the runtime code actually imports. `rich` is
+    # listed explicitly as of Phase 8 Part 2A — `clawstu.cli_chat`
+    # imports Console/Markdown/Panel/Prompt directly, so we no
+    # longer want to rely on the transitive pull-in via Typer.
     expected = {
         "anthropic",
         "apscheduler",
@@ -88,6 +91,7 @@ def test_dependencies_include_all_runtime_essentials() -> None:
         "onnxruntime",
         "openai",
         "pydantic",
+        "rich",
         "tokenizers",
         "typer",
         "uvicorn",

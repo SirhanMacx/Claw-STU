@@ -132,10 +132,18 @@ def _layer_of(relpath: pathlib.Path) -> str:
 
     clawstu/orchestrator/config.py -> "orchestrator"
     clawstu/cli.py                 -> "_cli"
+    clawstu/cli_chat.py            -> "_cli"
+    clawstu/setup_wizard.py        -> "setup_wizard"
     clawstu/__init__.py            -> "__init__" (skipped — not in _ALLOWED)
+
+    Both ``cli.py`` and ``cli_chat.py`` collapse onto the ``_cli``
+    layer because they are sibling CLI entry points with identical
+    permissions. ``setup_wizard.py`` stays its own layer because it
+    is intentionally restricted: the wizard runs before any pedagogy
+    is wired and must not accidentally drag in api/persistence/etc.
     """
     parts = relpath.parts
-    if parts[0] == "cli.py":
+    if parts[0] in ("cli.py", "cli_chat.py"):
         return "_cli"
     if len(parts) < 2:
         return parts[0].replace(".py", "")

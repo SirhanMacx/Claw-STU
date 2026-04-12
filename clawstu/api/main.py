@@ -30,7 +30,7 @@ from clawstu.scheduler.registry import default_registry
 from clawstu.scheduler.runner import SchedulerRunner
 
 
-def _build_providers(cfg: AppConfig) -> dict[str, LLMProvider]:
+def build_providers(cfg: AppConfig) -> dict[str, LLMProvider]:
     """Build the provider dict the router will draw from.
 
     Echo + Ollama are always present:
@@ -45,6 +45,13 @@ def _build_providers(cfg: AppConfig) -> dict[str, LLMProvider]:
     populated in `cfg`. A missing key means the provider isn't built
     and the router naturally falls through to the next entry in
     `cfg.fallback_chain`.
+
+    Public because :mod:`clawstu.cli_chat` reuses the same factory to
+    construct providers for the in-process learn / resume commands.
+    The Phase 8 Part 2 chat loop runs without the HTTP app, so it
+    builds its own ModelRouter directly, and duplicating this factory
+    would mean two places to keep in sync every time a new provider
+    lands.
     """
     providers: dict[str, LLMProvider] = {
         "echo": EchoProvider(),
@@ -91,7 +98,7 @@ def _build_proactive_context(state: AppState) -> ProactiveContext:
     BrainStore to walk in tests and offline development.
     """
     cfg = load_config()
-    providers = _build_providers(cfg)
+    providers = build_providers(cfg)
     router = ModelRouter(config=cfg, providers=providers)
     brain_store = state.brain_store or BrainStore(
         Path(tempfile.gettempdir()) / "clawstu-brain"

@@ -242,7 +242,7 @@ class TestProactiveContextProviderWiring:
         and lands on Ollama (the first chain entry that's always
         present in the providers dict). Echo never appears.
 
-        This pins the contract that ``_build_providers`` always
+        This pins the contract that ``build_providers`` always
         includes Ollama unconditionally and that the router's chain
         walking actually fires when a primary key is missing.
         """
