@@ -198,7 +198,7 @@ PRs welcome. Built by a teacher in New York. Every design choice lives in `docs/
 
 ## Status
 
-v0.2.0 on PyPI. All 8 phases shipped: adaptive session loop, multi-provider LLM support, SQLite persistence, brain memory store, inbound safety gate, proactive scheduler, interactive CLI, and web UI. 457 tests, mypy `--strict` clean on 85 source files, 88% coverage, under 1 second runtime.
+v4.12.2026 on PyPI. All 8 phases shipped: adaptive session loop, multi-provider LLM support, SQLite persistence, brain memory store, inbound safety gate, proactive scheduler, interactive CLI, and web UI. Plus Telegram bot, MCP server, Chrome extension, WebSocket chat, and HTTP API. 520 tests, mypy `--strict` clean on 89 source files, 85% coverage, under 2 seconds runtime.
 
 ---
 

@@ -86,7 +86,7 @@ These are tested via `tests/test_soul_invariants.py`.
 ```json
 {
   "status": "ok",
-  "version": "0.1.0",
+  "version": "4.12.2026",
   "invariants": {
     "soul_md_loaded": true,
     "safety_filters_active": true,

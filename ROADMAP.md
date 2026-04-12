@@ -4,9 +4,9 @@ Claw-STU is pre-alpha. This roadmap is a living document — it shifts as
 the project learns what learners actually need. The ordering below is the
 current best guess; feedback and real usage will reorder it.
 
-## Now — v0.2.0 (Providers, memory, proactive agent)
+## Shipped — v4.12.2026 (Providers, memory, proactive agent)
 
-The current implementation pass. Tracked in full detail at
+Shipped and live on PyPI. Tracked in full detail at
 [`docs/superpowers/specs/2026-04-11-claw-stu-providers-memory-proactive-design.md`](docs/superpowers/specs/2026-04-11-claw-stu-providers-memory-proactive-design.md).
 
 **Goals:**
@@ -23,7 +23,7 @@ The current implementation pass. Tracked in full detail at
 - PyPI distribution as `pip install clawstu`
 - Console entry point: `clawstu serve | scheduler | profile | doctor`
 
-**Non-goals for v0.2.0:** frontend, guardian dashboard, games, Claw-ED
+**Non-goals for v4.12.2026:** frontend beyond web UI, guardian dashboard, games, Claw-ED
 handoff, serverless deployment, i18n. Each has its own slot below.
 
 ## Next — v0.3.0 (Frontend)
@@ -64,7 +64,7 @@ Interactive learning experiences beyond text + questions.
 
 Post-MVP per Handoff.md. The deterministic seed library grows beyond the
 four US History blocks. Live-content generation already works for any
-topic in v0.2.0 — this phase adds **curated** seed content for:
+topic in v4.12.2026 -- this phase adds **curated** seed content for:
 
 - Global History (covering the 9th-10th grade Regents scope)
 - Civics (government, Supreme Court, elections)
@@ -106,7 +106,7 @@ robust safety architecture.
 For students without reliable internet access, the core functionality
 runs fully locally.
 
-- Local Ollama is already supported in v0.2.0 for model inference
+- Local Ollama is already supported in v4.12.2026 for model inference
 - Brain + SQLite are already local
 - This phase adds: local-only config (no "it works better with Claude"
   fallbacks that require a network), explicit offline-mode startup

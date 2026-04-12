@@ -172,7 +172,7 @@ A detailed breakdown of what Claw-STU ships today.
 
 | Feature | Status | Notes |
 |---|---|---|
-| `pip install clawstu` on PyPI | Shipped | v0.2.0 |
+| `pip install clawstu` on PyPI | Shipped | v4.12.2026 |
 | Hatchling build backend | Shipped | `pyproject.toml` |
 | GitHub Actions CI (test + lint + type) | Shipped | `.github/workflows/ci.yml` |
 | Web UI landing page | Shipped | `docs/index.html` |
