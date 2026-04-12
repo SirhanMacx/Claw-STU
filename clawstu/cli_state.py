@@ -30,6 +30,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from clawstu.engagement.session import Session
 from clawstu.memory.store import BrainStore
@@ -99,7 +100,7 @@ def default_stores() -> StoreBundle:
     )
 
 
-def _read_and_validate_state_json(path: Path) -> dict:
+def _read_and_validate_state_json(path: Path) -> dict[str, object]:
     """Read the state JSON file and validate its schema version.
 
     Returns the parsed dict. Raises ValueError on bad JSON or
@@ -126,7 +127,7 @@ def _read_and_validate_state_json(path: Path) -> dict:
 
 
 def _load_learners_and_sessions(
-    store: InMemoryPersistentStore, raw: dict,
+    store: InMemoryPersistentStore, raw: dict[str, Any],
 ) -> None:
     """Deserialize learners and sessions into the store."""
     for entry in raw.get("learners", []):
@@ -135,7 +136,7 @@ def _load_learners_and_sessions(
         store.sessions.upsert(Session.model_validate(entry))
 
 
-def _load_events(store: InMemoryPersistentStore, raw: dict) -> None:
+def _load_events(store: InMemoryPersistentStore, raw: dict[str, Any]) -> None:
     """Deserialize observation events into the store.
 
     Events carry the (learner_id, session_id) tuple alongside the
@@ -158,7 +159,7 @@ def _load_events(store: InMemoryPersistentStore, raw: dict) -> None:
         )
 
 
-def _load_zpd_estimates(store: InMemoryPersistentStore, raw: dict) -> None:
+def _load_zpd_estimates(store: InMemoryPersistentStore, raw: dict[str, Any]) -> None:
     """Deserialize ZPD estimates per learner per domain into the store."""
     for learner_id, per_domain in (raw.get("zpd") or {}).items():
         if not isinstance(per_domain, dict):
@@ -177,7 +178,7 @@ def _load_zpd_estimates(store: InMemoryPersistentStore, raw: dict) -> None:
 
 
 def _load_modality_outcomes(
-    store: InMemoryPersistentStore, raw: dict,
+    store: InMemoryPersistentStore, raw: dict[str, Any],
 ) -> None:
     """Deserialize modality outcomes per learner into the store."""
     for learner_id, per_modality in (raw.get("modality_outcomes") or {}).items():
@@ -198,7 +199,7 @@ def _load_modality_outcomes(
             store.modality_outcomes.upsert_all(learner_id, modality_outcomes)
 
 
-def _load_misconceptions(store: InMemoryPersistentStore, raw: dict) -> None:
+def _load_misconceptions(store: InMemoryPersistentStore, raw: dict[str, Any]) -> None:
     """Deserialize misconception tallies per learner into the store."""
     for learner_id, tallies in (raw.get("misconceptions") or {}).items():
         if not isinstance(tallies, dict):
@@ -211,7 +212,7 @@ def _load_misconceptions(store: InMemoryPersistentStore, raw: dict) -> None:
             store.misconceptions.upsert_all(learner_id, coerced)
 
 
-def _load_kg_triples(store: InMemoryPersistentStore, raw: dict) -> None:
+def _load_kg_triples(store: InMemoryPersistentStore, raw: dict[str, Any]) -> None:
     """Deserialize knowledge-graph triples into the store."""
     for triple in raw.get("kg", []):
         if not isinstance(triple, dict):

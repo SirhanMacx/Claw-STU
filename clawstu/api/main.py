@@ -13,7 +13,11 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from clawstu.engagement.session import Session, SessionRunner
+    from clawstu.profile.model import Domain, LearnerProfile
 
 from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -349,7 +353,7 @@ async def _ws_parse_onboard(
 
 def _ws_build_session(
     msg: WsOnboardMessage,
-) -> tuple[object, object, object, ModelRouter, bool, str | None]:
+) -> tuple[LearnerProfile, Session, SessionRunner, ModelRouter, bool, str | None]:
     """Build session objects from a validated onboard message.
 
     Returns ``(profile, session, runner, router, degraded, reason)``.
@@ -378,10 +382,10 @@ def _ws_build_session(
 
 
 def _ws_fallback_onboard(
-    runner: object,
+    runner: SessionRunner,
     msg: WsOnboardMessage,
-    domain: object,
-) -> tuple[object, object, str]:
+    domain: Domain,
+) -> tuple[LearnerProfile, Session, str]:
     """Seed-library fallback when live provider is unreachable (STU-5).
 
     Tries the requested domain first; falls back to US_HISTORY if
@@ -391,19 +395,19 @@ def _ws_fallback_onboard(
 
     reason = "provider unreachable, using seed library"
     try:
-        prof, ws_sess = runner.onboard(  # type: ignore[attr-defined]
+        prof, ws_sess = runner.onboard(
             learner_id=msg.name, age=msg.age,
             domain=domain, topic=msg.topic,
         )
     except ValueError:
-        prof, ws_sess = runner.onboard(  # type: ignore[attr-defined]
+        prof, ws_sess = runner.onboard(
             learner_id=msg.name, age=msg.age,
             domain=Domain.US_HISTORY, topic=msg.topic,
         )
         if domain != Domain.US_HISTORY:
             reason = (
                 f"provider unreachable, using seed library; "
-                f"domain changed from {domain.value} "  # type: ignore[attr-defined]
+                f"domain changed from {domain.value} "
                 f"to us_history (only seed domain available)"
             )
     return prof, ws_sess, reason
@@ -411,7 +415,7 @@ def _ws_fallback_onboard(
 
 async def _ws_build_session_with_topic(
     msg: WsOnboardMessage,
-) -> tuple[object, object, object, ModelRouter, bool, str | None]:
+) -> tuple[LearnerProfile, Session, SessionRunner, ModelRouter, bool, str | None]:
     """Build session with topic-aware live-content onboarding.
 
     Falls back to the seed-library path when the provider is
@@ -433,6 +437,7 @@ async def _ws_build_session_with_topic(
     router = ModelRouter(config=cfg, providers=providers)
     runner = SessionRunner(live_content=LiveContentGenerator(router=router))
 
+    assert msg.topic is not None  # caller guarantees topic is set
     try:
         prof, ws_sess = await runner.onboard_with_topic(
             learner_id=msg.name, age=msg.age, domain=domain, topic=msg.topic,
@@ -454,7 +459,7 @@ async def _ws_build_session_with_topic(
 async def _ws_handle_onboard(
     websocket: WebSocket,
     rate_limiter: _WsRateLimiter,
-) -> tuple[object, object, object, ModelRouter] | None:
+) -> tuple[LearnerProfile, Session, SessionRunner, ModelRouter] | None:
     """Orchestrate onboard: parse, build session, send setup message.
 
     Returns ``(profile, ws_session, runner, router)`` on success, or
