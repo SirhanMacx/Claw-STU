@@ -263,15 +263,24 @@ def create_app() -> FastAPI:
                         topic=topic,
                     )
                 except Exception:
-                    fallback_domain = (
-                        domain if domain is not Domain.OTHER else Domain.US_HISTORY
-                    )
-                    profile, ws_session = runner.onboard(
-                        learner_id=name,
-                        age=age,
-                        domain=fallback_domain,
-                        topic=topic,
-                    )
+                    # Fall back to the sync seed-library path.
+                    # US_HISTORY is the only domain with a full seed
+                    # pathway; try the requested domain first, then
+                    # US_HISTORY if that fails.
+                    try:
+                        profile, ws_session = runner.onboard(
+                            learner_id=name,
+                            age=age,
+                            domain=domain,
+                            topic=topic,
+                        )
+                    except ValueError:
+                        profile, ws_session = runner.onboard(
+                            learner_id=name,
+                            age=age,
+                            domain=Domain.US_HISTORY,
+                            topic=topic,
+                        )
                     if ws_session.phase == SessionPhase.CALIBRATING:
                         runner.finish_calibration(profile, ws_session)
             else:

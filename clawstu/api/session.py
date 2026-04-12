@@ -178,12 +178,25 @@ async def onboard(
                     live_content_override=live,
                 )
             except Exception:
-                profile, session = state.runner.onboard(
-                    learner_id=request.learner_id,
-                    age=request.age,
-                    domain=request.domain,
-                    topic=request.topic,
-                )
+                # Provider unreachable — fall back to the sync
+                # seed-library path.  Use US_HISTORY when the
+                # requested domain has no seed pathway (OTHER,
+                # SCIENCE, etc.) since US_HISTORY is the only
+                # domain with a full deterministic content set.
+                try:
+                    profile, session = state.runner.onboard(
+                        learner_id=request.learner_id,
+                        age=request.age,
+                        domain=request.domain,
+                        topic=request.topic,
+                    )
+                except ValueError:
+                    profile, session = state.runner.onboard(
+                        learner_id=request.learner_id,
+                        age=request.age,
+                        domain=Domain.US_HISTORY,
+                        topic=request.topic,
+                    )
         else:
             # No topic: deterministic seed-library path with calibration.
             profile, session = state.runner.onboard(
