@@ -36,6 +36,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
+from clawstu import __version__
 from clawstu.cli_state import (
     NoLearnersError,
     StoreBundle,
@@ -662,7 +663,6 @@ def _iter_learner_ids(
 # ---------------------------------------------------------------------------
 
 _EXPORT_SCHEMA_VERSION = 1
-_CLAWSTU_VERSION = "0.2.1"
 
 
 def run_profile_export(
@@ -745,7 +745,7 @@ def run_profile_export(
             "schema_version": _EXPORT_SCHEMA_VERSION,
             "exported_at": datetime.now(UTC).isoformat(),
             "learner_id": resolved.learner_id,
-            "clawstu_version": _CLAWSTU_VERSION,
+            "clawstu_version": __version__,
         }
         (staging / "meta.json").write_text(
             _json.dumps(meta, indent=2), encoding="utf-8",

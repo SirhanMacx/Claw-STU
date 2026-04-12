@@ -7,6 +7,8 @@ right shapes, and honor the session phases at the HTTP boundary.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,14 +16,15 @@ from clawstu.api.main import create_app
 from clawstu.api.state import AppState, get_state
 
 
-@pytest.fixture
-def client() -> TestClient:
+@pytest.fixture()
+def client() -> Iterator[TestClient]:
     app = create_app()
     # Replace the app state with a fresh instance so tests don't leak
     # sessions between each other.
     fresh_state = AppState()
     app.dependency_overrides[get_state] = lambda: fresh_state
-    return TestClient(app)
+    with TestClient(app) as tc:
+        yield tc
 
 
 def test_health_endpoint(client: TestClient) -> None:

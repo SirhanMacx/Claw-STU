@@ -6,6 +6,8 @@ degrade. See HEARTBEAT.md §"Safety invariants".
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -135,13 +137,14 @@ class TestBoundaryEnforcer:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.fixture
-def safety_client() -> TestClient:
+@pytest.fixture()
+def safety_client() -> Iterator[TestClient]:
     """Fresh TestClient + fresh AppState for isolated gate tests."""
     app = create_app()
     fresh_state = AppState()
     app.dependency_overrides[get_state] = lambda: fresh_state
-    return TestClient(app)
+    with TestClient(app) as tc:
+        yield tc
 
 
 def _onboard(client: TestClient, learner_id: str = "safety-learner") -> str:

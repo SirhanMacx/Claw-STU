@@ -9,6 +9,7 @@ pre-Phase-5 tests keep working with `AppState()` defaults).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -21,13 +22,14 @@ from clawstu.memory.pages import LearnerPage, PageKind, SessionPage
 from clawstu.memory.store import BrainStore
 
 
-@pytest.fixture
-def brain_client(tmp_path: Path) -> tuple[TestClient, AppState, BrainStore]:
+@pytest.fixture()
+def brain_client(tmp_path: Path) -> Iterator[tuple[TestClient, AppState, BrainStore]]:
     brain = BrainStore(tmp_path / "brain")
     state = AppState(brain_store=brain)
     app = create_app()
     app.dependency_overrides[get_state] = lambda: state
-    return TestClient(app), state, brain
+    with TestClient(app) as tc:
+        yield tc, state, brain
 
 
 def _onboard_and_close(
@@ -95,19 +97,18 @@ class TestSessionCloseWritesBrainPages:
         state = AppState()  # no brain_store=...
         app = create_app()
         app.dependency_overrides[get_state] = lambda: state
-        client = TestClient(app)
-
-        onboard = client.post(
-            "/sessions",
-            json={
-                "learner_id": "noop-learner",
-                "age": 15,
-                "domain": "us_history",
-            },
-        )
-        assert onboard.status_code == 201
-        session_id = onboard.json()["session_id"]
-        close = client.post(f"/sessions/{session_id}/close")
-        assert close.status_code == 200
-        # No attribute errors, no exceptions.
-        assert state.brain_store is None
+        with TestClient(app) as client:
+            onboard = client.post(
+                "/sessions",
+                json={
+                    "learner_id": "noop-learner",
+                    "age": 15,
+                    "domain": "us_history",
+                },
+            )
+            assert onboard.status_code == 201
+            session_id = onboard.json()["session_id"]
+            close = client.post(f"/sessions/{session_id}/close")
+            assert close.status_code == 200
+            # No attribute errors, no exceptions.
+            assert state.brain_store is None

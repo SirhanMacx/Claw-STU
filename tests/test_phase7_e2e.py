@@ -20,6 +20,7 @@ deterministic.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -32,16 +33,17 @@ from clawstu.persistence.store import InMemoryPersistentStore
 from clawstu.scheduler.tasks import prepare_next_session
 
 
-@pytest.fixture
+@pytest.fixture()
 def phase7_app(
     tmp_path: Path,
-) -> tuple[TestClient, AppState, BrainStore]:
+) -> Iterator[tuple[TestClient, AppState, BrainStore]]:
     brain = BrainStore(tmp_path / "brain")
     persistence = InMemoryPersistentStore()
     state = AppState(persistence=persistence, brain_store=brain)
     app = create_app()
     app.dependency_overrides[get_state] = lambda: state
-    return TestClient(app), state, brain
+    with TestClient(app) as tc:
+        yield tc, state, brain
 
 
 async def test_end_to_end_warm_start_cycle(

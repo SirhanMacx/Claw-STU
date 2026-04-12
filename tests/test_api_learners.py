@@ -16,6 +16,7 @@ Routes covered:
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -37,10 +38,10 @@ from clawstu.profile.model import (
 )
 
 
-@pytest.fixture
+@pytest.fixture()
 def wired(
     tmp_path: Path,
-) -> tuple[TestClient, AppState, BrainStore]:
+) -> Iterator[tuple[TestClient, AppState, BrainStore]]:
     """Return (client, state, brain) with both stores wired.
 
     A per-test AppState ensures no state leaks between tests. The
@@ -52,7 +53,8 @@ def wired(
     state = AppState(persistence=persistence, brain_store=brain)
     app = create_app()
     app.dependency_overrides[get_state] = lambda: state
-    return TestClient(app), state, brain
+    with TestClient(app) as tc:
+        yield tc, state, brain
 
 
 def _seed_learner(
@@ -113,10 +115,10 @@ class TestWikiRoute:
         state = AppState()  # no brain_store
         app = create_app()
         app.dependency_overrides[get_state] = lambda: state
-        client = TestClient(app)
-        response = client.get("/learners/alice/wiki/anything")
-        assert response.status_code == 503
-        assert response.json()["detail"] == "brain store not configured"
+        with TestClient(app) as client:
+            response = client.get("/learners/alice/wiki/anything")
+            assert response.status_code == 503
+            assert response.json()["detail"] == "brain store not configured"
 
 
 class TestResumeRoute:
@@ -295,10 +297,10 @@ class TestCaptureRoute:
         )
         app = create_app()
         app.dependency_overrides[get_state] = lambda: state
-        client = TestClient(app)
-        response = client.post(
-            "/learners/alice/capture",
-            json={"title": "Hello", "text": "note"},
-        )
-        assert response.status_code == 503
-        assert response.json()["detail"] == "brain store not configured"
+        with TestClient(app) as client:
+            response = client.post(
+                "/learners/alice/capture",
+                json={"title": "Hello", "text": "note"},
+            )
+            assert response.status_code == 503
+            assert response.json()["detail"] == "brain store not configured"

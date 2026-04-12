@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from clawstu.api.main import create_app
@@ -13,11 +15,13 @@ from clawstu.api.state import AppState, get_state
 _EXT_DIR = Path(__file__).resolve().parent.parent / "extension"
 
 
-def _client() -> TestClient:
+@pytest.fixture()
+def client() -> Iterator[TestClient]:
     app = create_app()
     fresh_state = AppState()
     app.dependency_overrides[get_state] = lambda: fresh_state
-    return TestClient(app)
+    with TestClient(app) as tc:
+        yield tc
 
 
 def test_chrome_extension_manifest_exists() -> None:
@@ -43,9 +47,8 @@ def test_extension_icons_exist() -> None:
         assert icon.exists(), f"Missing icon: icon{size}.png"
 
 
-def test_api_ask_returns_response() -> None:
+def test_api_ask_returns_response(client: TestClient) -> None:
     """POST /api/ask should return a Socratic response."""
-    client = _client()
     resp = client.post("/api/ask", json={"question": "What is photosynthesis?"})
     assert resp.status_code == 200
     data = resp.json()
@@ -54,8 +57,7 @@ def test_api_ask_returns_response() -> None:
     assert len(data["response"]) > 0
 
 
-def test_api_ask_rejects_empty_question() -> None:
+def test_api_ask_rejects_empty_question(client: TestClient) -> None:
     """POST /api/ask should reject an empty question."""
-    client = _client()
     resp = client.post("/api/ask", json={"question": ""})
     assert resp.status_code == 422

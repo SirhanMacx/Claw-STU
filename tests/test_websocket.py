@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+import pytest
 from starlette.testclient import TestClient
 
 from clawstu.api.main import create_app
 from clawstu.api.state import AppState, get_state
 
 
-def _client() -> TestClient:
+@pytest.fixture()
+def client() -> Iterator[TestClient]:
     app = create_app()
     fresh_state = AppState()
     app.dependency_overrides[get_state] = lambda: fresh_state
-    return TestClient(app)
+    with TestClient(app) as tc:
+        yield tc
 
 
-def test_websocket_rejects_non_onboard() -> None:
+def test_websocket_rejects_non_onboard(client: TestClient) -> None:
     """Sending a non-onboard message first should produce an error."""
-    client = _client()
     with client.websocket_connect("/ws/chat") as ws:
         ws.send_json({"type": "answer", "text": "hello"})
         data = ws.receive_json()
@@ -25,9 +29,8 @@ def test_websocket_rejects_non_onboard() -> None:
         assert "onboard" in data["message"].lower()
 
 
-def test_websocket_onboard_returns_setup() -> None:
+def test_websocket_onboard_returns_setup(client: TestClient) -> None:
     """A valid onboard message should return a setup response."""
-    client = _client()
     with client.websocket_connect("/ws/chat") as ws:
         ws.send_json({
             "type": "onboard",
@@ -42,9 +45,8 @@ def test_websocket_onboard_returns_setup() -> None:
         assert "provider" in data
 
 
-def test_websocket_close_sends_summary() -> None:
+def test_websocket_close_sends_summary(client: TestClient) -> None:
     """Sending close after onboard should produce a summary."""
-    client = _client()
     with client.websocket_connect("/ws/chat") as ws:
         ws.send_json({
             "type": "onboard",
