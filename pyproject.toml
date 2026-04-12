@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clawstu"
-version = "0.2.1"
+version = "4.12.2026"
 description = "Stuart — a personal learning agent that grows with the student."
 readme = "README.md"
 requires-python = ">=3.11"
