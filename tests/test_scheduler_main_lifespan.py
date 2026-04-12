@@ -19,6 +19,7 @@ The route tests verify:
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -175,3 +176,112 @@ class TestAdminSchedulerRoute:
         assert run["token_cost_input"] == 10
         assert run["token_cost_output"] == 20
         assert run["error_message"] is None
+
+
+class TestProactiveContextProviderWiring:
+    """Phase 8 Part 1: lifespan builds real providers from AppConfig."""
+
+    def test_proactive_context_builds_real_providers_when_config_has_keys(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """When AppConfig has real API keys, the context's router is
+        populated with the corresponding concrete providers -- not
+        the deterministic Echo we used to ship in Phase 6.
+
+        The router exposes its resolution map privately. Instead of
+        reaching into ``_resolved`` we walk every TaskKind via the
+        public ``for_task`` API and collect the resolved provider
+        types. With Anthropic + OpenAI + OpenRouter + Ollama all
+        present, the default routing table should never need to fall
+        through to Echo for any kind.
+        """
+        monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-fake")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+
+        from clawstu.api.main import _build_proactive_context
+        from clawstu.api.state import AppState
+        from clawstu.orchestrator.provider_anthropic import AnthropicProvider
+        from clawstu.orchestrator.provider_ollama import OllamaProvider
+        from clawstu.orchestrator.provider_openrouter import OpenRouterProvider
+        from clawstu.orchestrator.providers import EchoProvider
+        from clawstu.orchestrator.task_kinds import TaskKind
+
+        ctx = _build_proactive_context(AppState())
+        provider_types: set[type] = set()
+        for kind in TaskKind:
+            provider, _model = ctx.router.for_task(kind)
+            provider_types.add(type(provider))
+
+        assert AnthropicProvider in provider_types, (
+            f"missing Anthropic in resolved router: {provider_types}"
+        )
+        assert OpenRouterProvider in provider_types, (
+            f"missing OpenRouter in resolved router: {provider_types}"
+        )
+        assert OllamaProvider in provider_types, (
+            f"missing Ollama in resolved router: {provider_types}"
+        )
+        # With every key set, no TaskKind should fall through to Echo.
+        assert EchoProvider not in provider_types, (
+            f"Echo fell through unexpectedly -- a real provider was "
+            f"missing for one of the TaskKinds. "
+            f"Resolved types: {provider_types}"
+        )
+
+    def test_proactive_context_falls_through_to_ollama_with_partial_keys(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """With only OPENAI_API_KEY set, every TaskKind whose primary
+        is openrouter or anthropic resolves through the fallback chain
+        and lands on Ollama (the first chain entry that's always
+        present in the providers dict). Echo never appears.
+
+        This pins the contract that ``_build_providers`` always
+        includes Ollama unconditionally and that the router's chain
+        walking actually fires when a primary key is missing.
+        """
+        monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+        for key in (
+            "ANTHROPIC_API_KEY",
+            "OPENROUTER_API_KEY",
+            "OLLAMA_API_KEY",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-only")
+
+        from clawstu.api.main import _build_proactive_context
+        from clawstu.api.state import AppState
+        from clawstu.orchestrator.provider_anthropic import AnthropicProvider
+        from clawstu.orchestrator.provider_ollama import OllamaProvider
+        from clawstu.orchestrator.provider_openai import OpenAIProvider
+        from clawstu.orchestrator.provider_openrouter import OpenRouterProvider
+        from clawstu.orchestrator.providers import EchoProvider
+        from clawstu.orchestrator.task_kinds import TaskKind
+
+        ctx = _build_proactive_context(AppState())
+        provider_types: set[type] = set()
+        for kind in TaskKind:
+            provider, _model = ctx.router.for_task(kind)
+            provider_types.add(type(provider))
+
+        # Anthropic and OpenRouter were never built, so they cannot
+        # appear in the resolved router.
+        assert AnthropicProvider not in provider_types
+        assert OpenRouterProvider not in provider_types
+        # Ollama is unconditionally present, so the fallback chain
+        # lands there for every TaskKind whose primary was missing.
+        assert OllamaProvider in provider_types
+        # OpenAI was built but no TaskKind names it as primary (the
+        # spec routing table picks anthropic/ollama/openrouter only),
+        # so it does not appear in the resolved set even though it
+        # was constructed.
+        assert OpenAIProvider not in provider_types
+        # Echo never resolves because Ollama is always present and
+        # appears earlier in the fallback chain.
+        assert EchoProvider not in provider_types
