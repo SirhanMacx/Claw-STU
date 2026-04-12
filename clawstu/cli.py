@@ -432,6 +432,22 @@ def profile_import(
     run_profile_import(path=path, overwrite=overwrite)
 
 
+@app.command("mcp-server")
+def mcp_server() -> None:
+    """Start Stuart as an MCP server (stdin/stdout, for Claude Code integration).
+
+    Exposes Stuart's capabilities as MCP tools that Claude Code,
+    Claude Desktop, and other MCP clients can invoke directly.
+    Uses stdio transport (the MCP standard).
+
+    Tools exposed: clawstu_ask, clawstu_wiki, clawstu_progress,
+    clawstu_review, clawstu_learn_session.
+    """
+    from clawstu.mcp_server import run_mcp_server
+
+    run_mcp_server()
+
+
 def main() -> None:
     """Entry point wired to pyproject.toml's [project.scripts]."""
     app()
