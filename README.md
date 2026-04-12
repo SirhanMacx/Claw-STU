@@ -12,7 +12,7 @@ An open-source personal learning agent (persona name: **Stuart**) that adapts to
   <a href="https://github.com/SirhanMacx/Claw-STU/actions/workflows/ci.yml"><img src="https://github.com/SirhanMacx/Claw-STU/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="MIT"></a>
   <a href="https://github.com/SirhanMacx/Claw-STU/stargazers"><img src="https://img.shields.io/github/stars/SirhanMacx/Claw-STU?style=social" alt="Stars"></a>
-  <a href="https://pepy.tech/project/clawstu"><img src="https://static.pepy.tech/badge/clawstu" alt="Downloads"></a>
+  <a href="https://pypi.org/project/clawstu/"><img src="https://img.shields.io/pypi/dm/clawstu" alt="Downloads"></a>
 </p>
 
 ```bash
@@ -207,7 +207,7 @@ PRs welcome. Built by a teacher in New York. Every design choice lives in `docs/
 
 ## Status
 
-v4.12.2026 on PyPI. 655 tests, mypy `--strict` clean on 90 source files, under 2 seconds runtime. CI green on Python 3.11 + 3.12.
+v4.12.2026.1 on PyPI. 670 tests, mypy `--strict` clean on 90 source files, under 2 seconds runtime. CI green on Python 3.11 + 3.12.
 
 ---
 
