@@ -34,6 +34,10 @@ def test_help_mentions_every_command() -> None:
     for command in (
         "learn",
         "resume",
+        "wiki",
+        "progress",
+        "history",
+        "review",
         "serve",
         "doctor",
         "scheduler",
@@ -302,3 +306,41 @@ def test_resume_command_without_artifact_reports_nothing_to_resume(
     stdout = _plain(result.stdout)
     assert "nothing to resume" in stdout
     assert "clawstu learn" in stdout
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 Part 2B: companion command smoke tests
+# ---------------------------------------------------------------------------
+
+
+def test_wiki_command_exists_in_help() -> None:
+    """`clawstu wiki --help` returns 0 and describes the concept wiki."""
+    result = runner.invoke(app, ["wiki", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "wiki" in stdout.lower()
+    assert "concept" in stdout.lower()
+
+
+def test_progress_command_exists_in_help() -> None:
+    """`clawstu progress --help` returns 0 and describes the dashboard."""
+    result = runner.invoke(app, ["progress", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "progress" in stdout.lower()
+
+
+def test_history_command_exists_in_help() -> None:
+    """`clawstu history --help` returns 0 and describes the listing."""
+    result = runner.invoke(app, ["history", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "history" in stdout.lower()
+
+
+def test_review_command_exists_in_help() -> None:
+    """`clawstu review --help` returns 0 and describes spaced review."""
+    result = runner.invoke(app, ["review", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "review" in stdout.lower()

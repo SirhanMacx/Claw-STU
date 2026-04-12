@@ -3,12 +3,17 @@
 Thin wrapper over the HTTP API and the proactive scheduler. No
 pedagogical logic lives here; every command calls functions that
 already exist in clawstu.api, clawstu.orchestrator, clawstu.memory,
-clawstu.scheduler, or (Phase 8 Part 2A) clawstu.cli_chat.
+clawstu.scheduler, clawstu.cli_chat, or (Phase 8 Part 2B)
+clawstu.cli_companions.
 
 Commands:
   clawstu                                    drop into `learn` (default)
   clawstu learn [TOPIC]                      start an interactive learning session
   clawstu resume <learner_id>                warm-start from a pre-generated artifact
+  clawstu wiki CONCEPT                       per-student concept wiki (markdown)
+  clawstu progress                           learner dashboard (ZPD, modalities)
+  clawstu history                            past sessions for a learner
+  clawstu review                             concepts due for spaced review
   clawstu setup                              interactive provider wizard
   clawstu serve                              start the FastAPI app
   clawstu doctor                             self-diagnosis
@@ -122,6 +127,85 @@ def learn(
         domain=domain_enum,
     )
     run_chat_session(inputs=inputs)
+
+
+@app.command()
+def wiki(
+    concept: str = typer.Argument(
+        ...,
+        help="Concept name (e.g. 'french_revolution_causes').",
+    ),
+    learner_id: str | None = typer.Option(
+        None,
+        "--learner",
+        "-l",
+        help=(
+            "Learner ID. Defaults to the most recently active learner."
+        ),
+    ),
+) -> None:
+    """Print Stuart's per-student wiki for a concept.
+
+    Pulls the learner's ConceptPage compiled truth, the misconceptions
+    flagged on the concept, and the tied primary sources. Renders as
+    markdown in the terminal.
+    """
+    from clawstu.cli_companions import run_wiki
+
+    run_wiki(concept=concept, learner_id=learner_id)
+
+
+@app.command()
+def progress(
+    learner_id: str | None = typer.Option(
+        None, "--learner", "-l",
+        help=(
+            "Learner ID. Defaults to the most recently active learner."
+        ),
+    ),
+) -> None:
+    """Show the learner dashboard: ZPD per domain, modality mix, sessions."""
+    from clawstu.cli_companions import run_progress
+
+    run_progress(learner_id=learner_id)
+
+
+@app.command()
+def history(
+    learner_id: str | None = typer.Option(
+        None, "--learner", "-l",
+        help=(
+            "Learner ID. Defaults to the most recently active learner."
+        ),
+    ),
+    limit: int = typer.Option(
+        10, "--limit", "-n", help="Most recent N sessions.",
+    ),
+) -> None:
+    """List past sessions for a learner."""
+    from clawstu.cli_companions import run_history
+
+    run_history(learner_id=learner_id, limit=limit)
+
+
+@app.command()
+def review(
+    learner_id: str | None = typer.Option(
+        None, "--learner", "-l",
+        help=(
+            "Learner ID. Defaults to the most recently active learner."
+        ),
+    ),
+) -> None:
+    """Show concepts due for spaced review.
+
+    A concept is due when its most recent CHECK_FOR_UNDERSTANDING or
+    CALIBRATION_ANSWER event is older than 7 days. Same cutoff the
+    `spaced_review` scheduler task uses for the queue API surface.
+    """
+    from clawstu.cli_companions import run_review
+
+    run_review(learner_id=learner_id)
 
 
 @app.command()
