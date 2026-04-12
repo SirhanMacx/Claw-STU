@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import pytest
 
+from clawstu.api.rate_limit import reset_rate_state
 from clawstu.engagement.session import Session, SessionRunner
 from clawstu.orchestrator.config import AppConfig
 from clawstu.orchestrator.providers import EchoProvider, LLMProvider
 from clawstu.orchestrator.router import ModelRouter
 from clawstu.persistence.store import InMemoryPersistentStore
 from clawstu.profile.model import Domain, LearnerProfile
+
+
+@pytest.fixture(autouse=True)
+def _clear_rate_limits() -> None:
+    """Reset the in-memory rate limiter before every test."""
+    reset_rate_state()
 
 
 @pytest.fixture

@@ -22,9 +22,10 @@ violation returns HTTP 400 with a restate message.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from clawstu.api.rate_limit import limiter
 from clawstu.api.state import AppState, SessionBundle, get_state
 from clawstu.assessment.evaluator import EvaluationResult, Evaluator
 from clawstu.assessment.generator import AssessmentItem
@@ -153,8 +154,10 @@ def _halt_for_boundary(decision: InboundDecision) -> HTTPException:
 
 
 @router.post("", response_model=OnboardResponse, status_code=201)
+@limiter.limit("10/minute")
 async def onboard(
     request: OnboardRequest,
+    http_request: Request,
     state: AppState = Depends(get_state),
 ) -> OnboardResponse:
     try:
@@ -226,9 +229,11 @@ def get_session(
 
 
 @router.post("/{session_id}/calibration-answer", response_model=AnswerResponse)
-def submit_calibration_answer(
+@limiter.limit("30/minute")
+async def submit_calibration_answer(
     session_id: str,
     request: AnswerRequest,
+    http_request: Request,
     state: AppState = Depends(get_state),
 ) -> AnswerResponse:
     bundle = _bundle(state, session_id)
@@ -281,8 +286,10 @@ def finish_calibration(
 
 
 @router.post("/{session_id}/next", response_model=DirectiveResponse)
-def next_directive(
+@limiter.limit("30/minute")
+async def next_directive(
     session_id: str,
+    http_request: Request,
     state: AppState = Depends(get_state),
 ) -> DirectiveResponse:
     bundle = _bundle(state, session_id)
@@ -291,9 +298,11 @@ def next_directive(
 
 
 @router.post("/{session_id}/check-answer", response_model=DirectiveResponse)
-def submit_check_answer(
+@limiter.limit("30/minute")
+async def submit_check_answer(
     session_id: str,
     request: AnswerRequest,
+    http_request: Request,
     state: AppState = Depends(get_state),
 ) -> DirectiveResponse:
     bundle = _bundle(state, session_id)
@@ -334,9 +343,11 @@ def submit_check_answer(
 
 
 @router.post("/{session_id}/socratic", response_model=SocraticResponse)
+@limiter.limit("20/minute")
 async def socratic(
     session_id: str,
     request: SocraticRequest,
+    http_request: Request,
     state: AppState = Depends(get_state),
 ) -> SocraticResponse:
     """Ad-hoc student question routed through the safety gate and the

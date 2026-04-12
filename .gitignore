@@ -57,9 +57,15 @@ data/
 .env
 .env.local
 
-# Secrets
+# Secrets — never commit (explicit patterns to catch edge cases)
 *.pem
 *.key
+secrets.json
+**/secrets.json
+api_token
+**/api_token
+.credentials.json
+**/.credentials.json
 
 # Logs
 logs/

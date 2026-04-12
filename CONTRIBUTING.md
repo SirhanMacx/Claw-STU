@@ -71,7 +71,7 @@ in an issue before a PR.
 4. **Run the linter** and **type checker**:
    ```bash
    ruff check .
-   mypy src/
+   mypy clawstu/
    ```
 
 5. **Read the foundational test**:
@@ -91,14 +91,14 @@ in an issue before a PR.
 
 ## How to Add a New Modality
 
-Modalities live in `src/profile/model.py` as a `Modality` enum value.
+Modalities live in `clawstu/profile/model.py` as a `Modality` enum value.
 Stuart rotates through modalities based on observed engagement — the
 student never picks from a menu. Adding a new modality means:
 
-1. **Add the enum value** in `src/profile/model.py::Modality`. Pick a
+1. **Add the enum value** in `clawstu/profile/model.py::Modality`. Pick a
    snake_case value. The order matters only for display; the rotator
    treats all modalities as equal candidates.
-2. **Update `src/curriculum/content.py`** to add at least one
+2. **Update `clawstu/curriculum/content.py`** to add at least one
    `LearningBlock` at each `ComplexityTier` (approaching, meeting,
    exceeding) for the new modality. Without seed content the
    `ContentSelector.select()` falls back to whatever is available, which
@@ -120,7 +120,7 @@ student never picks from a menu. Adding a new modality means:
 
 ## How to Add a New Concept to the Seed Library
 
-The seed library in `src/curriculum/content.py` covers the deterministic
+The seed library in `clawstu/curriculum/content.py` covers the deterministic
 fallback path for offline / no-LLM-key use. It is intentionally small
 and intentionally explicit — every block is human-reviewed.
 
@@ -142,11 +142,10 @@ To add a concept:
 
 ## How to Add a New LLM Provider
 
-The `LLMProvider` protocol lives in `src/orchestrator/providers.py`
-(current) or `src/clawstu/orchestrator/providers.py` (post-Phase-1
-rename). A new provider is:
+The `LLMProvider` protocol lives in `clawstu/orchestrator/providers.py`.
+A new provider is:
 
-1. **A new file** `src/orchestrator/provider_<name>.py` implementing the
+1. **A new file** `clawstu/orchestrator/provider_<name>.py` implementing the
    protocol with a single async `complete()` method that calls
    `httpx.AsyncClient` and returns an `LLMResponse`.
 2. **`httpx.MockTransport`-based tests** in
@@ -168,7 +167,7 @@ Do not swallow exceptions. Every provider error should raise
 ## Code Style Guide
 
 Enforced automatically. CI will catch most of this; you can catch it
-earlier with `ruff check --fix` and `mypy src/`.
+earlier with `ruff check --fix` and `mypy clawstu/`.
 
 - **Python 3.11+ features.** `str | None`, `list[Foo]`, `@dataclass`, `match`.
 - **Type annotations on every public function.** `mypy --strict` is
@@ -199,11 +198,11 @@ Before opening a PR, confirm:
 
 - [ ] `pytest` is green locally (all existing tests plus your new ones)
 - [ ] `ruff check .` is clean
-- [ ] `mypy src/` is clean
+- [ ] `mypy clawstu/` is clean
 - [ ] Coverage is at or above 80% on new files
 - [ ] `tests/test_foundational_reteach.py` is green
 - [ ] No new `except Exception: pass` (use `grep -rn "except.*pass"
-      src/` before commit)
+      clawstu/` before commit)
 - [ ] No new function over ~50 lines (use `ruff` or manual check)
 - [ ] No raw student text or `learner_id` in any log statement
 - [ ] CHANGELOG.md has an `[Unreleased]` entry describing the change
@@ -220,14 +219,14 @@ Before opening a PR, confirm:
 This project serves minors. Crisis handling is not a feature — it is a
 foundational invariant.
 
-If you touch any code under `src/safety/`, `src/api/` (any handler
-accepting student text), or `src/orchestrator/chain.py`, you must:
+If you touch any code under `clawstu/safety/`, `clawstu/api/` (any handler
+accepting student text), or `clawstu/orchestrator/chain.py`, you must:
 
 1. **Confirm the inbound safety gate still runs** on every student-text
    entry point. The relevant tests are in `tests/test_safety.py` and
    `tests/test_inbound_safety_gate.py`.
 2. **Not degrade the crisis detection regex patterns** in
-   `src/safety/escalation.py`. Adding patterns is welcome. Removing
+   `clawstu/safety/escalation.py`. Adding patterns is welcome. Removing
    them requires a written rationale in the PR description.
 3. **Not add any code path that returns LLM-generated text to a
    student without the `BoundaryEnforcer` outbound check.**
@@ -247,7 +246,7 @@ get familiar with the codebase without needing to understand everything.
 
 Examples of good first issues we'd love help with:
 - Expand the seed library with another US History concept
-- Add a new CRQ rubric template to `src/assessment/feedback.py`
+- Add a new CRQ rubric template to `clawstu/assessment/feedback.py`
 - Improve a docstring that's hand-wavy
 - Add a missing type annotation flagged by `mypy`
 - Port a crisis detection pattern from a validated clinical source

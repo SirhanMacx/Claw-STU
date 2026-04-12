@@ -7,12 +7,14 @@ Run locally with:
 
 from __future__ import annotations
 
+import os
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from starlette.staticfiles import StaticFiles
 
@@ -159,6 +161,29 @@ def create_app() -> FastAPI:
         version=__version__,
         lifespan=lifespan,
     )
+
+    # ── CORS ────────────────────────────────────────────────────────
+    # Supports localhost + Chrome extension origins.  Mirrors Claw-ED's
+    # pattern (clawed/api/server.py) for cross-repo consistency.
+    cors_origins_raw = os.environ.get("CLAW_STU_CORS_ORIGINS", "")
+    if cors_origins_raw:
+        cors_origins = [
+            o.strip() for o in cors_origins_raw.split(",") if o.strip()
+        ]
+    else:
+        cors_origins = [
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_origin_regex=r"^chrome-extension://[a-z]{32}$",
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
+
     app.include_router(session.router)
     app.include_router(profile.router)
     app.include_router(admin.router)

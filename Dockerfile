@@ -11,7 +11,13 @@ RUN pip install --no-cache-dir .
 RUN mkdir -p /data/.claw-stu && chmod 700 /data/.claw-stu
 ENV CLAW_STU_DATA_DIR=/data/.claw-stu
 
+# Run as non-root — matches Claw-ED's Docker hardening.
+RUN groupadd -r clawstu && useradd -r -g clawstu -m clawstu \
+    && chown -R clawstu:clawstu /data
+USER clawstu
+
 EXPOSE 8000
 
-# Default: start the FastAPI server
-CMD ["clawstu", "serve", "--host", "0.0.0.0", "--port", "8000"]
+# Default: localhost-only.  Use a reverse proxy (nginx, Caddy) to
+# expose to external networks.
+CMD ["clawstu", "serve", "--host", "127.0.0.1", "--port", "8000"]

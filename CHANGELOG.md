@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses date-based versioning (e.g. `4.12.2026`)
 following the Claw-ED naming convention.
 
+## v4.12.2026.1 — 2026-04-12
+
+### Security
+- Added CORS middleware with `CLAW_STU_CORS_ORIGINS` env var and Chrome extension support
+- Added in-memory per-IP rate limiting on all session-lifecycle endpoints
+- Hardened auth from optional dev-mode to production-default with three modes: enforce, generate, dev
+- Dockerfile now runs as non-root user `clawstu`
+- Docker Compose binds to localhost only (127.0.0.1:8000)
+- Added explicit secrets patterns to .gitignore (secrets.json, api_token, .credentials.json)
+
+### Fixed
+- Fixed 15 stale `src/` path references in CONTRIBUTING.md (now all `clawstu/`)
+
+### Changed
+- Adopted 4-segment version scheme (MAJOR.MINOR.YEAR.PATCH) matching Claw-ED
+- Added Docker build + smoke test job to CI pipeline
+- Publish job now requires Docker build to pass
+
 ## [Unreleased]
 
 ### Planned — Phase 1 (Providers, memory, proactive agent)

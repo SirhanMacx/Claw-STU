@@ -1,12 +1,15 @@
 services:
   stuart:
     build: .
+    # Localhost-only — use a reverse proxy for external access.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - stuart-data:/data/.claw-stu
     environment:
       - CLAW_STU_DATA_DIR=/data/.claw-stu
+      # Auth mode: enforce | generate | dev
+      # - STU_AUTH_MODE=generate
       # Pass provider keys via env
       # - ANTHROPIC_API_KEY=sk-ant-...
       # - OPENAI_API_KEY=sk-...
