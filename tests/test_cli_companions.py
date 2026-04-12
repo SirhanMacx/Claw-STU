@@ -421,3 +421,76 @@ def test_ask_passes_question_through_reasoning_chain(
     # The EchoProvider returns the prompt back verbatim, so the user's
     # question (or a prefix of it) should appear in the response.
     assert "supply" in stdout.lower() or "demand" in stdout.lower()
+
+
+# ── profile export / import ───────────────────────────────────────
+
+
+def test_export_creates_valid_tarball(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """``profile export`` produces a .tar.gz with the expected files."""
+    import tarfile
+
+    _monkeypatch_stores(monkeypatch, tmp_path)
+    out = str(tmp_path / "ada.tar.gz")
+    result = runner.invoke(
+        app, ["profile", "export", "ada", "--out", out],
+    )
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "Exported" in stdout
+
+    # Verify tarball contents.
+    assert Path(out).exists()
+    with tarfile.open(out, "r:gz") as tar:
+        names = tar.getnames()
+    assert "profile.json" in names
+    assert "meta.json" in names
+    assert "sessions.jsonl" in names
+    assert "events.jsonl" in names
+
+
+def test_import_round_trips_a_learner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Export then import into a fresh persistence -- learner comes back."""
+    # Phase 1: seed and export.
+    store = InMemoryPersistentStore()
+    store.learners.upsert(_make_profile("bob"))
+    store.sessions.upsert(
+        _make_session("bob", topic="mitosis"),
+    )
+    event = ObservationEvent(
+        kind=EventKind.SESSION_START,
+        domain=Domain.SCIENCE,
+    )
+    store.events.append(event, learner_id="bob", session_id=None)
+    _monkeypatch_stores(monkeypatch, tmp_path, store)
+
+    out = str(tmp_path / "bob.tar.gz")
+    result = runner.invoke(
+        app, ["profile", "export", "bob", "--out", out],
+    )
+    assert result.exit_code == 0, result.stdout
+
+    # Phase 2: import into a fresh data dir.
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(fresh))
+
+    result = runner.invoke(
+        app, ["profile", "import", out],
+    )
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "bob" in stdout
+    assert "1 sessions" in stdout or "1 session" in stdout
+
+    # Phase 3: verify the imported learner is visible.
+    result = runner.invoke(
+        app, ["progress", "--learner", "bob"],
+    )
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "bob" in stdout

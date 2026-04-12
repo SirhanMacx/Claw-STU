@@ -391,25 +391,40 @@ def scheduler_run_once(
 def profile_export(
     learner_id: str = typer.Argument(...),
     out: str = typer.Option(..., "--out", "-o", help="Output tarball path."),
+    force: bool = typer.Option(
+        False, "--force", "-f",
+        help="Overwrite the output file if it already exists.",
+    ),
 ) -> None:
-    """Export a learner profile + brain pages as a tarball (Phase 7)."""
-    typer.echo(f"clawstu profile export {learner_id} --out {out}")
-    typer.secho(
-        "NOTE: profile/brain tarball export lands in Phase 7. "
-        "This command is a placeholder in Phase 1.",
-        fg=typer.colors.YELLOW,
-    )
+    """Export a learner profile + brain pages as a .tar.gz tarball.
+
+    The tarball contains profile.json, sessions.jsonl, events.jsonl,
+    a brain/ directory with the learner's concept pages, and a
+    meta.json with the schema version and export timestamp.
+    """
+    from clawstu.cli_companions import run_profile_export
+
+    run_profile_export(learner_id=learner_id, out=out, force=force)
 
 
 @profile_app.command("import")
-def profile_import(path: str = typer.Argument(...)) -> None:
-    """Import a previously exported learner tarball (Phase 7)."""
-    typer.echo(f"clawstu profile import {path}")
-    typer.secho(
-        "NOTE: profile import lands in Phase 7. "
-        "This command is a placeholder in Phase 1.",
-        fg=typer.colors.YELLOW,
-    )
+def profile_import(
+    path: str = typer.Argument(...),
+    overwrite: bool = typer.Option(
+        False, "--overwrite",
+        help="Replace an existing learner with the imported one.",
+    ),
+) -> None:
+    """Import a previously exported learner tarball.
+
+    Reads a .tar.gz created by ``profile export``, validates the
+    schema version, and upserts the learner, sessions, events, and
+    brain pages into persistence. Refuses to overwrite an existing
+    learner unless ``--overwrite`` is passed.
+    """
+    from clawstu.cli_companions import run_profile_import
+
+    run_profile_import(path=path, overwrite=overwrite)
 
 
 def main() -> None:

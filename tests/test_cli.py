@@ -352,3 +352,13 @@ def test_ask_command_exists_in_help() -> None:
     assert result.exit_code == 0, result.stdout
     stdout = _plain(result.stdout)
     assert "question" in stdout.lower()
+
+
+def test_profile_export_is_no_longer_placeholder() -> None:
+    """`profile export --help` does NOT say 'placeholder'."""
+    result = runner.invoke(app, ["profile", "export", "--help"])
+    assert result.exit_code == 0, result.stdout
+    stdout = _plain(result.stdout)
+    assert "placeholder" not in stdout.lower()
+    # Should mention tarball / tar.gz
+    assert "tar" in stdout.lower() or "export" in stdout.lower()

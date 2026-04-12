@@ -42,6 +42,7 @@ from clawstu.cli_state import (
     default_stores,
     most_recent_learner,
 )
+from clawstu.engagement.session import Session
 from clawstu.memory.wiki import generate_concept_wiki
 from clawstu.persistence.store import InMemoryPersistentStore
 from clawstu.profile.model import (
@@ -643,6 +644,266 @@ def _iter_learner_ids(
 
 
 # ---------------------------------------------------------------------------
+# profile export / import
+# ---------------------------------------------------------------------------
+
+_EXPORT_SCHEMA_VERSION = 1
+_CLAWSTU_VERSION = "0.2.0"
+
+
+def run_profile_export(
+    learner_id: str, out: str, *, force: bool = False,
+) -> None:
+    """Implement ``clawstu profile export LEARNER_ID --out PATH``.
+
+    Creates a ``.tar.gz`` tarball containing:
+
+    - ``profile.json`` — :meth:`LearnerProfile.model_dump_json` pretty-printed.
+    - ``sessions.jsonl`` — one JSON-per-line of each :class:`Session`.
+    - ``events.jsonl`` — one JSON-per-line of each :class:`ObservationEvent`
+      (with the learner_id + session_id envelope).
+    - ``brain/`` — a recursive copy of the learner's brain directory.
+    - ``meta.json`` — schema_version, exported_at, learner_id, clawstu_version.
+
+    Refuses to overwrite an existing file unless ``--force`` is given.
+    """
+    import json as _json
+    import shutil
+    import tarfile
+    import tempfile
+    from pathlib import Path as _Path
+
+    out_path = _Path(out)
+    if out_path.exists() and not force:
+        typer.secho(
+            f"file already exists: {out_path}. "
+            "Pass --force to overwrite.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    bundle = default_stores()
+    resolved = _resolve_learner(bundle.persistence, learner_id)
+    profile = resolved.profile
+
+    # Stage everything in a temp directory, then tar it.
+    with tempfile.TemporaryDirectory() as td:
+        staging = _Path(td)
+
+        # profile.json
+        (staging / "profile.json").write_text(
+            profile.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+
+        # sessions.jsonl
+        sessions = bundle.persistence.sessions.list_for_learner(
+            resolved.learner_id,
+        )
+        with (staging / "sessions.jsonl").open("w", encoding="utf-8") as fh:
+            for session in sessions:
+                fh.write(session.model_dump_json())
+                fh.write("\n")
+
+        # events.jsonl
+        events_raw = _iter_events_for_export(
+            bundle.persistence, resolved.learner_id,
+        )
+        with (staging / "events.jsonl").open("w", encoding="utf-8") as fh:
+            for envelope in events_raw:
+                fh.write(_json.dumps(envelope))
+                fh.write("\n")
+
+        # brain/ — copy the learner's brain directory if it exists.
+        from clawstu.memory.store import _learner_hash
+
+        brain_subdir = (
+            bundle.brain_store._base / _learner_hash(resolved.learner_id)
+        )
+        brain_dest = staging / "brain"
+        if brain_subdir.exists():
+            shutil.copytree(brain_subdir, brain_dest)
+        else:
+            brain_dest.mkdir()
+
+        # meta.json
+        meta = {
+            "schema_version": _EXPORT_SCHEMA_VERSION,
+            "exported_at": datetime.now(UTC).isoformat(),
+            "learner_id": resolved.learner_id,
+            "clawstu_version": _CLAWSTU_VERSION,
+        }
+        (staging / "meta.json").write_text(
+            _json.dumps(meta, indent=2), encoding="utf-8",
+        )
+
+        # Create the tarball.
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(str(out_path), "w:gz") as tar:
+            for entry in sorted(staging.rglob("*")):
+                arcname = str(entry.relative_to(staging))
+                tar.add(str(entry), arcname=arcname)
+
+    size = out_path.stat().st_size
+    typer.echo(
+        f"\u2713 Exported to {out_path} ({size} bytes)"
+    )
+
+
+def run_profile_import(
+    path: str, *, overwrite: bool = False,
+) -> None:
+    """Implement ``clawstu profile import PATH [--overwrite]``.
+
+    Reads a tarball created by ``profile export``, validates the
+    ``meta.json`` schema, deserializes the profile + sessions + events,
+    upserts everything into persistence, and copies the brain/
+    directory back into the :class:`BrainStore`.
+    """
+    import json as _json
+    import shutil
+    import tarfile
+    import tempfile
+    from pathlib import Path as _Path
+
+    from clawstu.cli_state import save_persistence_to_disk
+    from clawstu.memory.store import _learner_hash
+
+    source = _Path(path)
+    if not source.exists():
+        typer.secho(f"file not found: {source}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    if not tarfile.is_tarfile(str(source)):
+        typer.secho(f"not a tarball: {source}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    with tempfile.TemporaryDirectory() as td:
+        extract_dir = _Path(td) / "extracted"
+        extract_dir.mkdir()
+        with tarfile.open(str(source), "r:gz") as tar:
+            tar.extractall(path=str(extract_dir), filter="data")
+
+        # Validate meta.json.
+        meta_path = extract_dir / "meta.json"
+        if not meta_path.exists():
+            typer.secho("tarball missing meta.json", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta.get("schema_version") != _EXPORT_SCHEMA_VERSION:
+            typer.secho(
+                f"unsupported schema_version: {meta.get('schema_version')}",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+
+        # Deserialize profile.
+        profile_path = extract_dir / "profile.json"
+        if not profile_path.exists():
+            typer.secho("tarball missing profile.json", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        profile = LearnerProfile.model_validate_json(
+            profile_path.read_text(encoding="utf-8"),
+        )
+        learner_id = profile.learner_id
+
+        bundle = default_stores()
+
+        # Check for existing learner.
+        if (
+            bundle.persistence.learners.get(learner_id) is not None
+            and not overwrite
+        ):
+            typer.secho(
+                f"learner {learner_id!r} already exists. "
+                "Pass --overwrite to replace.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+
+        bundle.persistence.learners.upsert(profile)
+
+        # Sessions.
+        sessions_path = extract_dir / "sessions.jsonl"
+        session_count = 0
+        if sessions_path.exists():
+            for line in sessions_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                session = Session.model_validate_json(line)
+                bundle.persistence.sessions.upsert(session)
+                session_count += 1
+
+        # Events.
+        events_path = extract_dir / "events.jsonl"
+        event_count = 0
+        if events_path.exists():
+            for line in events_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                envelope = _json.loads(line)
+                event = ObservationEvent.model_validate(envelope.get("event", {}))
+                session_id = envelope.get("session_id")
+                resolved_sid: str | None = (
+                    session_id if isinstance(session_id, str) else None
+                )
+                bundle.persistence.events.append(
+                    event,
+                    learner_id=learner_id,
+                    session_id=resolved_sid,
+                )
+                event_count += 1
+
+        # Brain directory.
+        brain_src = extract_dir / "brain"
+        if brain_src.exists() and any(brain_src.iterdir()):
+            brain_dest = (
+                bundle.brain_store._base / _learner_hash(learner_id)
+            )
+            if brain_dest.exists():
+                shutil.rmtree(brain_dest)
+            shutil.copytree(brain_src, brain_dest)
+
+        # Persist to disk.
+        save_persistence_to_disk(
+            bundle.persistence, bundle.state_path,
+        )
+
+    typer.echo(
+        f"\u2713 Imported learner {learner_id!r} with "
+        f"{session_count} sessions and {event_count} events."
+    )
+
+
+def _iter_events_for_export(
+    persistence: InMemoryPersistentStore, learner_id: str,
+) -> list[dict[str, object]]:
+    """Return events as envelope dicts for JSONL serialization."""
+
+    raw: object = getattr(persistence.events, "_rows", [])
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, object]] = []
+    for row in raw:
+        if not (isinstance(row, tuple) and len(row) == 3):
+            continue
+        lid, sid, event = row
+        if lid != learner_id:
+            continue
+        if not isinstance(event, ObservationEvent):
+            continue
+        out.append(
+            {
+                "learner_id": lid,
+                "session_id": sid if isinstance(sid, str) else None,
+                "event": event.model_dump(mode="json"),
+            }
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers (exported for the tests)
 # ---------------------------------------------------------------------------
 
@@ -662,6 +923,8 @@ __all__ = [
     "build_stores_for_tests",
     "run_ask",
     "run_history",
+    "run_profile_export",
+    "run_profile_import",
     "run_progress",
     "run_review",
     "run_wiki",
