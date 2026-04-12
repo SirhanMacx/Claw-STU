@@ -31,6 +31,7 @@ from clawstu.orchestrator.providers import (
     LLMResponse,
     ProviderError,
 )
+from clawstu.orchestrator.router import ModelRouter, RouterConstructionError
 from clawstu.orchestrator.task_kinds import TaskKind
 
 __all__ = [
@@ -42,12 +43,14 @@ __all__ = [
     "LLMResponse",
     "LiveContentGenerator",
     "LiveGenerationError",
+    "ModelRouter",
     "OllamaProvider",
     "OpenAIProvider",
     "OpenRouterProvider",
     "PromptLibrary",
     "ProviderError",
     "ReasoningChain",
+    "RouterConstructionError",
     "TaskKind",
     "TaskRoute",
     "ensure_data_dir",
