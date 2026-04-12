@@ -178,15 +178,17 @@ The test suite runs fully offline via a deterministic `EchoProvider` — no API 
 
 Requires Python 3.11+.
 
-- [CONTRIBUTING](CONTRIBUTING.md) — how to add a modality, a provider, a seed concept
-- [FEATURES](FEATURES.md) — detailed shipped-vs-planned breakdown
-- [ROADMAP](ROADMAP.md) — what's next
-- [CHANGELOG](CHANGELOG.md) — what's landed
-- [SECURITY](SECURITY.md) — privacy, data handling, crisis escalation
-- [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md) — community standards
+- [Getting Started](GETTING_STARTED.md) — 5-minute setup guide
+- [Features](FEATURES.md) — detailed feature breakdown
+- [FAQ](FAQ.md) — common questions from learners and parents
+- [Architecture](ARCHITECTURE.md) — system design and module map
+- [Roadmap](ROADMAP.md) — what's next
+- [Changelog](CHANGELOG.md) — what's landed
+- [Contributing](CONTRIBUTING.md) — how to add a modality, a provider, a seed concept
+- [Security](SECURITY.md) — privacy, data handling, crisis escalation
+- [Code of Conduct](CODE_OF_CONDUCT.md) — community standards
 - [SOUL.md](SOUL.md) — Stuart's identity and behavioral constraints
 - [HEARTBEAT.md](HEARTBEAT.md) — operational invariants and health contract
-- [Handoff.md](Handoff.md) — the full vision document
 - [Issues](https://github.com/SirhanMacx/Claw-STU/issues)
 - [Discussions](https://github.com/SirhanMacx/Claw-STU/discussions)
 
@@ -196,7 +198,7 @@ PRs welcome. Built by a teacher in New York. Every design choice lives in `docs/
 
 ## Status
 
-Pre-alpha. The deterministic session loop and foundational invariants are green (89 tests, 85% coverage, under 1 second). LLM providers, memory, scheduler, and PyPI distribution land as the next implementation pass — see [`docs/superpowers/specs/2026-04-11-claw-stu-providers-memory-proactive-design.md`](docs/superpowers/specs/2026-04-11-claw-stu-providers-memory-proactive-design.md).
+v0.2.0 on PyPI. All 8 phases shipped: adaptive session loop, multi-provider LLM support, SQLite persistence, brain memory store, inbound safety gate, proactive scheduler, interactive CLI, and web UI. 457 tests, mypy `--strict` clean on 85 source files, 88% coverage, under 1 second runtime.
 
 ---
 
