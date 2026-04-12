@@ -94,7 +94,8 @@ _ALLOWED: dict[str, frozenset[str]] = {
         {"orchestrator", "memory", "persistence", "engagement", "profile"}
     ),
     # cli is effectively api-layer (top); allow everything plus the
-    # top-level setup_wizard and cli_chat sibling modules.
+    # top-level setup_wizard, cli_chat, cli_state, and cli_companions
+    # sibling modules.
     "_cli": frozenset(
         {
             "safety",
@@ -109,6 +110,8 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "scheduler",
             "setup_wizard",
             "cli_chat",
+            "cli_state",
+            "cli_companions",
         }
     ),
     # setup_wizard is a sibling of cli.py — also a top-level module.
@@ -134,17 +137,25 @@ def _layer_of(relpath: pathlib.Path) -> str:
     clawstu/orchestrator/config.py -> "orchestrator"
     clawstu/cli.py                 -> "_cli"
     clawstu/cli_chat.py            -> "_cli"
+    clawstu/cli_state.py           -> "_cli"
+    clawstu/cli_companions.py      -> "_cli"
     clawstu/setup_wizard.py        -> "setup_wizard"
     clawstu/__init__.py            -> "__init__" (skipped — not in _ALLOWED)
 
-    Both ``cli.py`` and ``cli_chat.py`` collapse onto the ``_cli``
-    layer because they are sibling CLI entry points with identical
-    permissions. ``setup_wizard.py`` stays its own layer because it
-    is intentionally restricted: the wizard runs before any pedagogy
-    is wired and must not accidentally drag in api/persistence/etc.
+    ``cli.py``, ``cli_chat.py``, ``cli_state.py``, and
+    ``cli_companions.py`` all collapse onto the ``_cli`` layer because
+    they are sibling CLI entry points with identical permissions.
+    ``setup_wizard.py`` stays its own layer because it is intentionally
+    restricted: the wizard runs before any pedagogy is wired and must
+    not accidentally drag in api/persistence/etc.
     """
     parts = relpath.parts
-    if parts[0] in ("cli.py", "cli_chat.py"):
+    if parts[0] in (
+        "cli.py",
+        "cli_chat.py",
+        "cli_state.py",
+        "cli_companions.py",
+    ):
         return "_cli"
     if len(parts) < 2:
         return parts[0].replace(".py", "")
