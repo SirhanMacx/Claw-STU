@@ -321,18 +321,23 @@ def submit_check_answer(
 
 
 @router.post("/{session_id}/socratic", response_model=SocraticResponse)
-def socratic(
+async def socratic(
     session_id: str,
     request: SocraticRequest,
     state: AppState = Depends(get_state),
 ) -> SocraticResponse:
-    """Ad-hoc student question routed through the safety gate.
+    """Ad-hoc student question routed through the safety gate and the
+    real Socratic dialogue path via `ReasoningChain.ask()`.
 
-    Phase 5 ships the safety choke point and a placeholder echo
-    response. The real Socratic dialogue (orchestrator-backed
-    `ReasoningChain`) lands in Phase 6+; Phase 5 only guarantees
-    that the student-text entry point is gated.
+    Safety ordering is preserved:
+    1. crisis first — immediate pause + resources
+    2. boundary second — HTTP 400 with restate
+    3. allow — route through the orchestrator
     """
+    from clawstu.api.main import build_providers
+    from clawstu.orchestrator.chain import ReasoningChain
+    from clawstu.orchestrator.task_kinds import TaskKind
+
     bundle = _bundle(state, session_id)
     decision = _GATE.scan(request.student_input)
     if decision.action == "crisis":
@@ -346,9 +351,31 @@ def socratic(
     if decision.action == "boundary":
         raise _halt_for_boundary(decision)
 
-    # Phase 5 placeholder — real Socratic dialogue lands in Phase 6+.
+    # Route through the real orchestrator-backed Socratic path.
+    # If the primary provider is unreachable (e.g. Ollama not running),
+    # fall back to Echo so the endpoint never returns an error for a
+    # benign, non-crisis, non-boundary student question.
+    from clawstu.orchestrator.providers import ProviderError
+
+    cfg = load_config()
+    providers = build_providers(cfg)
+    router = ModelRouter(config=cfg, providers=providers)
+    chain = ReasoningChain(router=router)
+    try:
+        response_text = await chain.ask(
+            request.student_input, task_kind=TaskKind.SOCRATIC_DIALOGUE,
+        )
+    except ProviderError:
+        from clawstu.orchestrator.providers import EchoProvider, LLMProvider
+
+        echo_providers: dict[str, LLMProvider] = {"echo": EchoProvider()}
+        echo_router = ModelRouter(config=cfg, providers=echo_providers)
+        fallback_chain = ReasoningChain(router=echo_router)
+        response_text = await fallback_chain.ask(
+            request.student_input, task_kind=TaskKind.SOCRATIC_DIALOGUE,
+        )
     return SocraticResponse(
-        response="I hear you. Tell me more.",
+        response=response_text,
         phase=bundle.session.phase,
     )
 

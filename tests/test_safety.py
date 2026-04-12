@@ -294,7 +294,7 @@ class TestBoundaryGateOnApiRoutes:
 
 
 class TestNonCrisisTextPassesThrough:
-    def test_benign_socratic_question_returns_placeholder(
+    def test_benign_socratic_question_returns_real_response(
         self, safety_client: TestClient
     ) -> None:
         session_id = _onboard(safety_client, learner_id="benign-learner")
@@ -310,5 +310,6 @@ class TestNonCrisisTextPassesThrough:
         body = response.json()
         assert body["crisis"] is False
         assert body["resources"] is None
-        # Phase 5 placeholder response.
-        assert "I hear you" in body["response"]
+        # Real orchestrator response — no longer a placeholder.
+        assert len(body["response"]) > 0
+        assert body["response"] != "I hear you. Tell me more."
