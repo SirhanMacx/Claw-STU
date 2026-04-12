@@ -4,6 +4,8 @@
 
 An open-source personal learning agent (persona name: **Stuart**) that adapts to how *you* learn. Not a tutoring bot. Not a content firehose. A cognitive tool that figures out your Zone of Proximal Development and meets you there — on any topic, at any time of day.
 
+**Website:** [sirhanmacx.github.io/Claw-STU](https://sirhanmacx.github.io/Claw-STU/) · **Sibling project:** [Claw-ED](https://sirhanmacx.github.io/Claw-ED/) — the teacher-facing co-teacher.
+
 <p align="center">
   <a href="https://pypi.org/project/clawstu/"><img src="https://img.shields.io/pypi/v/clawstu?color=blue" alt="PyPI"></a>
   <a href="https://pypi.org/project/clawstu/"><img src="https://img.shields.io/pypi/pyversions/clawstu" alt="Python"></a>

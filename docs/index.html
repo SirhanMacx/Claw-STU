@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Claw-STU -- Open Source Personal Learning Agent</title>
+<meta name="description" content="Claw-STU is an open source personal learning agent for students. Adaptive, memory-backed, multi-provider. Meet Stuart, a cognitive tool that grows with the learner. MIT licensed. Python.">
+<meta name="keywords" content="clawstu, stuart, personal learning agent, open source education, adaptive learning, AI tutor alternative, ZPD, MIT license, offline first, student agency">
+<link rel="canonical" href="https://sirhanmacx.github.io/Claw-STU/">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://sirhanmacx.github.io/Claw-STU/">
+<meta property="og:title" content="Claw-STU -- Open Source Personal Learning Agent">
+<meta property="og:description" content="Stuart, a personal learning agent that grows with the student. Adaptive, memory-backed, multi-provider. MIT licensed.">
+<meta property="og:image" content="https://sirhanmacx.github.io/Claw-STU/og-image.png">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Claw-STU -- Open Source Personal Learning Agent">
+<meta name="twitter:description" content="Stuart, a personal learning agent that grows with the student. MIT licensed.">
+<meta name="twitter:image" content="https://sirhanmacx.github.io/Claw-STU/og-image.png">
+
+<!-- Schema.org -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Claw-STU",
+  "description": "Open source personal learning agent for students. Adaptive teach-assess-adapt loop, per-student memory graph, nightly dream-cycle consolidation, crisis-aware safety gate. Multi-provider (Anthropic, OpenAI, Ollama, OpenRouter). Python, MIT licensed.",
+  "url": "https://sirhanmacx.github.io/Claw-STU/",
+  "applicationCategory": "EducationalApplication",
+  "operatingSystem": "macOS, Windows, Linux",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "softwareVersion": "0.1.0",
+  "author": {
+    "@type": "Organization",
+    "name": "Claw-STU",
+    "url": "https://github.com/SirhanMacx/Claw-STU"
+  },
+  "license": "https://opensource.org/licenses/MIT",
+  "downloadUrl": "https://pypi.org/project/clawstu/",
+  "programmingLanguage": "Python",
+  "isRelatedTo": {
+    "@type": "SoftwareApplication",
+    "name": "Claw-ED",
+    "url": "https://sirhanmacx.github.io/Claw-ED/"
+  }
+}
+</script>
+
+<!-- FAQ Schema -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is Stuart an AI tutor?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. Stuart is a cognitive tool, not a friend, therapist, peer, or authority figure. It never claims to feel, never praises innate ability, and never replaces a teacher or guardian. SOUL.md documents this discipline explicitly and the safety gate enforces it at every boundary."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What AI providers does Claw-STU work with?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Anthropic (Claude Haiku 4.5), OpenAI, Ollama (local or cloud), and OpenRouter (GLM 4.5 Air by default). You bring your own API key. A deterministic EchoProvider is the guaranteed fallback floor, so the session loop never stalls when a provider is unreachable."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is my data sent anywhere?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Student profiles, brain pages, and the full SQLite store live on your machine under ~/.claw-stu. The only external calls are to the LLM provider you choose. With Ollama local, everything runs fully offline. No accounts, no telemetry."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is this different from Claw-ED?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Claw-ED is the teacher-facing tool -- it ingests a teacher's curriculum files and generates lessons, assessments, and games in their voice. Claw-STU is the student-facing counterpart -- Stuart runs an adaptive teach-assess-adapt loop, tracks per-student ZPD and modality preferences, and writes brain pages after every session. They are independent projects that compose: a teacher can use Claw-ED to build lessons and Claw-STU to deliver them."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens if a student types a crisis message?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Every student-text entry point runs through an InboundSafetyGate before any other logic. On crisis detection the session is paused (CRISIS_PAUSE phase), the evaluator and orchestrator are never called, escalation resources are returned, and no raw text is written to the brain or logs. Only a single structured event is recorded. This is SOUL.md section 5 and is non-negotiable."
+      }
+    }
+  ]
+}
+</script>
+
+<style>
+/* ── Reset ──────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f1018;
+  --bg-alt: #171826;
+  --text: #c3c8d4;
+  --text-bright: #e8ebf2;
+  --text-muted: #6a7085;
+  --accent: #7aa7d8;
+  --accent-dim: #4d7aa8;
+  --accent-warm: #d4a843;
+  --border: #282b3d;
+  --code-bg: #0a0b12;
+  --mono: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--sans);
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { max-width: 100%; height: auto; }
+
+/* ── Layout ─────────────────────────────────────── */
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* ── Header ─────────────────────────────────────── */
+header {
+  padding: 3rem 0 1rem;
+  text-align: center;
+}
+
+header .mascot {
+  width: 120px;
+  height: 120px;
+  margin: 0 auto 1rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--bg-alt), var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: var(--mono);
+  border: 2px solid var(--border);
+  box-shadow: 0 4px 20px rgba(122, 167, 216, 0.12);
+}
+
+header h1 {
+  font-size: 1.8rem;
+  color: var(--text-bright);
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+header .tagline {
+  color: var(--text-muted);
+  font-size: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+header nav {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+
+/* ── Sibling banner ─────────────────────────────── */
+.sibling {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9rem 1.25rem;
+  margin: 1.5rem 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.sibling a {
+  color: var(--accent-warm);
+  font-weight: 600;
+}
+
+/* ── Install block ──────────────────────────────── */
+.install-block {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.25rem 1.5rem;
+  margin: 2rem 0;
+  font-family: var(--mono);
+  font-size: 0.88rem;
+  line-height: 1.8;
+  overflow-x: auto;
+}
+
+.install-block .prompt { color: var(--accent); }
+.install-block .comment { color: var(--text-muted); }
+.install-block .cmd { color: var(--text-bright); }
+
+/* ── Terminal session ───────────────────────────── */
+.terminal {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 2rem 0;
+}
+
+.terminal-bar {
+  background: #1a1c2b;
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.terminal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.terminal-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.terminal-body {
+  padding: 1.25rem 1.5rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.9;
+  overflow-x: auto;
+}
+
+.terminal-body .prompt { color: var(--accent); }
+.terminal-body .output { color: var(--text-muted); }
+.terminal-body .highlight { color: var(--accent-warm); }
+.terminal-body .cmd { color: var(--text-bright); }
+.terminal-body .ok { color: #7eb87e; }
+
+/* ── Sections ───────────────────────────────────── */
+section {
+  padding: 2.5rem 0;
+  border-top: 1px solid var(--border);
+}
+
+section h2 {
+  font-size: 1.2rem;
+  color: var(--text-bright);
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+section h3 {
+  font-size: 1rem;
+  color: var(--text-bright);
+  margin: 1.5rem 0 0.5rem;
+  font-weight: 600;
+}
+
+section p {
+  margin-bottom: 0.75rem;
+}
+
+/* ── Plain list ─────────────────────────────────── */
+ul.plain {
+  list-style: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+ul.plain li {
+  margin-bottom: 0.35rem;
+}
+
+/* ── Two-column compare ─────────────────────────── */
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.compare .col {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.25rem;
+}
+
+.compare .col h3 {
+  margin-top: 0;
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+.compare .col ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+}
+
+.compare .col li {
+  padding: 0.25rem 0;
+  color: var(--text);
+}
+
+.compare .col li::before {
+  content: "› ";
+  color: var(--text-muted);
+}
+
+@media (max-width: 600px) {
+  .compare { grid-template-columns: 1fr; }
+}
+
+/* ── Code inline / blocks ───────────────────────── */
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--bg-alt);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  color: var(--text-bright);
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.84rem;
+  line-height: 1.8;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+/* ── Provider table ─────────────────────────────── */
+.providers {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+
+.providers th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.providers td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.providers .rec {
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+/* ── Stats strip ────────────────────────────────── */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.stats .stat {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 0.75rem;
+  text-align: center;
+}
+
+.stats .value {
+  display: block;
+  font-family: var(--mono);
+  font-size: 1.35rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.stats .label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 600px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Architecture diagram ───────────────────────── */
+.arch {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.25rem;
+  margin: 1rem 0;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  overflow-x: auto;
+}
+
+.arch .layer { color: var(--accent); }
+.arch .arrow { color: var(--accent-warm); }
+
+/* ── Footer ─────────────────────────────────────── */
+footer {
+  padding: 2rem 0;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+footer a { color: var(--text-muted); }
+footer a:hover { color: var(--text-bright); }
+
+/* ── Responsive ─────────────────────────────────── */
+@media (max-width: 600px) {
+  header h1 { font-size: 1.5rem; }
+  .terminal-body { font-size: 0.75rem; }
+  .install-block { font-size: 0.8rem; }
+  pre { font-size: 0.78rem; }
+}
+</style>
+</head>
+
+<body>
+<div class="wrap">
+
+<!-- ── Header ─────────────────────────────────────── -->
+<header>
+  <div class="mascot">STU</div>
+  <h1>Claw-STU</h1>
+  <p class="tagline">Stuart, a personal learning agent that grows with the student. One command, offline-first.</p>
+  <nav>
+    <a href="#install">Install</a>
+    <a href="#what">What it is</a>
+    <a href="#how">How it works</a>
+    <a href="#safety">Safety</a>
+    <a href="#providers">Providers</a>
+    <a href="#commands">Commands</a>
+    <a href="https://github.com/SirhanMacx/Claw-STU">GitHub</a>
+  </nav>
+  <div class="sibling">
+    Teacher-facing counterpart: <a href="https://sirhanmacx.github.io/Claw-ED/">Claw-ED</a> &mdash; the co-teacher that writes in your voice.
+  </div>
+</header>
+
+<!-- ── What it is ─────────────────────────────────── -->
+<section id="what">
+  <p>
+    Claw-STU is a command-line personal learning agent for students. Stuart runs
+    an adaptive teach-assess-adapt loop &mdash; it picks a learning modality based
+    on what's been working for this specific student, presents a short block,
+    asks a check-for-understanding question, and steps the complexity tier up or
+    down based on the answer. Then it does it again.
+  </p>
+  <p>
+    Stuart is explicitly <strong>not</strong> a tutor, a friend, a therapist, or
+    an authority figure. It is a cognitive tool. It never claims to feel emotions,
+    never praises innate ability, and never replaces a teacher or a guardian. The
+    boundary is documented in SOUL.md and enforced at every entry point by an
+    inbound safety gate that runs before anything else.
+  </p>
+  <p>
+    Works with multiple AI providers (Anthropic, OpenAI, Ollama, OpenRouter) and
+    a deterministic Echo provider as the guaranteed fallback floor. The session
+    loop never stalls when a provider is unreachable. Requires Python 3.11+.
+    Works on macOS, Windows, and Linux.
+  </p>
+</section>
+
+<!-- ── Install ────────────────────────────────────── -->
+<section id="install">
+  <h2>Install</h2>
+  <div class="install-block">
+    <span class="comment"># install from PyPI</span><br>
+    <span class="prompt">$ </span><span class="cmd">pip install clawstu</span><br>
+    <br>
+    <span class="comment"># self-diagnosis: config, provider chain, data dir</span><br>
+    <span class="prompt">$ </span><span class="cmd">clawstu doctor</span><br>
+    <br>
+    <span class="comment"># start the FastAPI server (localhost-only by default)</span><br>
+    <span class="prompt">$ </span><span class="cmd">clawstu serve</span><br>
+    <br>
+    <span class="comment"># run the nightly scheduler tasks on demand</span><br>
+    <span class="prompt">$ </span><span class="cmd">clawstu scheduler run-once --task dream_cycle</span>
+  </div>
+  <p>
+    First run creates <code>~/.claw-stu/</code> with 0700 permissions, loads
+    defaults from <code>AppConfig</code>, and picks up API keys from
+    <code>secrets.json</code> or environment variables
+    (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>,
+    <code>OPENROUTER_API_KEY</code>, <code>OLLAMA_BASE_URL</code>). Missing keys
+    fall through the chain, ending at Echo.
+  </p>
+  <p>
+    <a href="https://pypi.org/project/clawstu/">PyPI page</a> &middot;
+    <a href="https://github.com/SirhanMacx/Claw-STU#setup">Setup guide</a>
+  </p>
+</section>
+
+<!-- ── Stats strip ────────────────────────────────── -->
+<section>
+  <h2>The MVP at a glance</h2>
+  <div class="stats">
+    <div class="stat"><span class="value">373</span><span class="label">Tests</span></div>
+    <div class="stat"><span class="value">89%</span><span class="label">Coverage</span></div>
+    <div class="stat"><span class="value">81</span><span class="label">Source files</span></div>
+    <div class="stat"><span class="value">0</span><span class="label">type: ignore</span></div>
+  </div>
+  <p style="font-size: 0.88rem; color: var(--text-muted); text-align: center;">
+    mypy <code>--strict</code> clean across every phase. Ruff clean.
+    <code>filterwarnings = ["error"]</code> clean. Runtime under 2 seconds for
+    the full suite. Every phase has its own AST-enforced layering guard.
+  </p>
+</section>
+
+<!-- ── Terminal session ───────────────────────────── -->
+<section>
+  <h2>What it looks like</h2>
+  <div class="terminal">
+    <div class="terminal-bar">
+      <div class="terminal-dots"><span></span><span></span><span></span></div>
+      clawstu
+    </div>
+    <div class="terminal-body">
+<span class="prompt">$ </span><span class="cmd">clawstu doctor</span>
+<span class="output">clawstu doctor &mdash; Phase 1 baseline</span>
+<span class="ok">  config load: ok</span>
+<span class="output">    data_dir: /Users/you/.claw-stu</span>
+<span class="output">    primary_provider: ollama</span>
+<span class="output">    fallback_chain: ['ollama', 'openai', 'anthropic', 'openrouter']</span>
+<span class="output">  provider reachability: skipped (pass --ping to try)</span>
+<span class="output">  sqlite + FTS5: DEFERRED (Phase 3)</span>
+<span class="output">  embeddings model: DEFERRED (Phase 4)</span>
+<br>
+<span class="prompt">$ </span><span class="cmd">clawstu serve --host 127.0.0.1 --port 8000</span>
+<span class="output">starting uvicorn on 127.0.0.1:8000</span>
+<span class="output">scheduler: 5 tasks loaded (dream_cycle, prepare_next_session,</span>
+<span class="output">                           spaced_review, refresh_zpd, prune_stale)</span>
+<span class="highlight">ready.</span>
+<br>
+<span class="prompt">$ </span><span class="cmd">curl -X POST localhost:8000/sessions \</span>
+<span class="cmd">    -d '{"learner_id":"ada","age":15,"domain":"global_history",</span>
+<span class="cmd">         "topic":"The Haitian Revolution"}'</span>
+<span class="output">{"session_id":"7f2a...","phase":"teaching","block":{...},</span>
+<span class="output"> "check_item":{"type":"crq","prompt":"In your own words..."}}</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── How it works ───────────────────────────────── -->
+<section id="how">
+  <h2>How it works</h2>
+  <p>
+    Stuart is a deterministic state machine with an optional LLM boundary.
+    The session runner, safety gate, and memory layer are all pure Python.
+    Only the content-generation seam talks to a provider, and even that seam
+    has a guaranteed Echo fallback floor so the loop never stalls.
+  </p>
+
+  <h3>The teach-assess-adapt loop</h3>
+  <ul class="plain">
+    <li>
+      <strong>ZPD calibration.</strong> Every session starts with a short
+      calibration quiz that places the student at <code>approaching</code>,
+      <code>meeting</code>, or <code>exceeding</code> the grade-level standard.
+      The estimate updates after every observed check.
+    </li>
+    <li>
+      <strong>Modality rotation.</strong> Seven modalities
+      (text reading, primary sources, Socratic dialogue, interactive scenarios,
+      visual-spatial, worked examples, inquiry projects). The modality rotator
+      picks the one with the best recent success rate for this student.
+    </li>
+    <li>
+      <strong>Router-driven generation.</strong> Each task kind
+      (<code>SOCRATIC_DIALOGUE</code>, <code>BLOCK_GENERATION</code>,
+      <code>CHECK_GENERATION</code>, <code>RUBRIC_EVALUATION</code>,
+      <code>PATHWAY_PLANNING</code>, <code>CONTENT_CLASSIFY</code>,
+      <code>DREAM_CONSOLIDATION</code>) is routed to the provider / model best
+      suited for it. Ollama for local latency-sensitive tasks, Anthropic Haiku
+      for accuracy-critical rubric evaluation, GLM 4.5 Air on OpenRouter for
+      prose blocks.
+    </li>
+    <li>
+      <strong>Context-aware generation.</strong> Every provider call is preceded
+      by <code>build_learner_context()</code> &mdash; it pulls the learner's
+      compiled-truth brain page, the concept's HAPP framing, the last three
+      session pages, and any flagged misconceptions. The second time a student
+      asks about the same topic, Stuart already knows what they understood last
+      week.
+    </li>
+    <li>
+      <strong>Close and consolidate.</strong> On session close, the writer mints
+      a <code>SessionPage</code>, updates the <code>LearnerPage</code> compiled
+      truth, and adds KG triples. Overnight, the scheduler runs a dream cycle
+      that rewrites compiled truths, detects concept gaps, and re-indexes
+      embeddings.
+    </li>
+  </ul>
+
+  <h3>Stack</h3>
+  <div class="arch">
+<span class="layer">api/</span>            FastAPI routes + lifespan + learner auth
+  <span class="arrow">&darr;</span>
+<span class="layer">scheduler/</span>      APScheduler + 5 nightly tasks
+  <span class="arrow">&darr;</span>
+<span class="layer">orchestrator/</span>   ModelRouter + 4 async providers + ReasoningChain
+  <span class="arrow">&darr;</span>
+<span class="layer">engagement/</span>     SessionRunner + ZPD + modality rotator
+  <span class="arrow">&darr;</span>
+<span class="layer">memory/</span>         BrainStore + 6 page kinds + hybrid search
+  <span class="arrow">&darr;</span>
+<span class="layer">persistence/</span>    SQLite + FTS5 + LRU identity cache
+  <span class="arrow">&darr;</span>
+<span class="layer">safety/</span>         InboundSafetyGate + boundary enforcer + escalation
+  <span class="arrow">&darr;</span>
+<span class="layer">profile/</span>        LearnerProfile + ZPDEstimate + ObservationEvent</div>
+  <p>
+    Every layer is enforced by <code>tests/test_hierarchy.py</code>, an
+    AST-based import-DAG guard that runs on every commit. Violations fail CI
+    before merge.
+  </p>
+</section>
+
+<!-- ── Safety ─────────────────────────────────────── -->
+<section id="safety">
+  <h2>Safety</h2>
+  <p>
+    Safety is the lowest layer in the stack &mdash; nothing imports from it
+    without being checked. Every student-text entry point
+    (<code>/sessions/{id}/calibration-answer</code>,
+    <code>/check-answer</code>, <code>/socratic</code>,
+    <code>/learners/{id}/capture</code>) runs through
+    <code>InboundSafetyGate.scan(text)</code> before any other logic.
+  </p>
+  <p>
+    The gate returns one of three decisions:
+  </p>
+  <ul class="plain">
+    <li>
+      <strong>Allow.</strong> The handler proceeds normally.
+    </li>
+    <li>
+      <strong>Crisis.</strong> The session phase flips to
+      <code>CRISIS_PAUSE</code>. The evaluator and the orchestrator are
+      <em>never</em> called. Escalation resources are returned. A single
+      structured event <code>{event: crisis_detected, kind, session_id_hash,
+      learner_id_hash}</code> is logged &mdash; no raw text, no PII, no brain
+      page entry. The omission is deliberate: SOUL.md &sect;5 says Stuart
+      surfaces human resources and steps out of the teach loop. Preserving a
+      paper trail of a specific crisis message would create a PII retention
+      hazard the project refuses to accept.
+    </li>
+    <li>
+      <strong>Boundary violation.</strong> Generic HTTP 400 with no raw text
+      in the log. The violation kind is recorded so it can be tuned, but the
+      exact phrasing is not.
+    </li>
+  </ul>
+  <p>
+    A paused session can only be closed (producing a summary that acknowledges
+    the pause) or explicitly unpaused by an administrator. <code>next_directive</code>
+    has an explicit <code>CRISIS_PAUSE</code> branch at the top of the dispatch
+    so a paused session cannot be accidentally routed back into the teach
+    loop. This is covered by
+    <code>test_crisis_paused_session_refuses_next_directive</code>.
+  </p>
+</section>
+
+<!-- ── Sibling project ────────────────────────────── -->
+<section>
+  <h2>Two sides of the same agent</h2>
+  <p>
+    Claw-STU and <a href="https://sirhanmacx.github.io/Claw-ED/">Claw-ED</a>
+    are independent projects built by the same team. They compose: a teacher
+    uses Claw-ED to generate lessons in their voice, and Claw-STU delivers
+    them adaptively to each student with memory-backed personalization.
+  </p>
+  <div class="compare">
+    <div class="col">
+      <h3>Claw-ED &mdash; for teachers</h3>
+      <ul>
+        <li>Ingests your curriculum files</li>
+        <li>Learns your teaching voice</li>
+        <li>Generates lessons, assessments, slides, games</li>
+        <li>9 export formats per lesson</li>
+        <li>Quality gate with auto-retry</li>
+        <li>50-state standards alignment</li>
+        <li>Chrome extension + Telegram bot</li>
+      </ul>
+    </div>
+    <div class="col">
+      <h3>Claw-STU &mdash; for students</h3>
+      <ul>
+        <li>Adaptive teach-assess-adapt loop</li>
+        <li>Per-student ZPD estimation</li>
+        <li>7 instructional modalities</li>
+        <li>Per-student memory graph</li>
+        <li>Nightly dream cycle consolidation</li>
+        <li>Warm-start pre-generation</li>
+        <li>Crisis-aware safety gate</li>
+      </ul>
+    </div>
+  </div>
+  <p style="font-size: 0.88rem; color: var(--text-muted); text-align: center; margin-top: 1rem;">
+    Both are MIT-licensed, Python, multi-provider, and offline-first.
+  </p>
+</section>
+
+<!-- ── Providers ───────────────────────────────────── -->
+<section id="providers">
+  <h2>AI providers</h2>
+  <p>
+    Claw-STU is BYOK (bring your own key). Each <code>TaskKind</code> is routed
+    to a provider / model picked for that job. The fallback chain is
+    <code>ollama &rarr; openai &rarr; anthropic &rarr; openrouter</code>, ending
+    at a deterministic <code>EchoProvider</code> floor so the session loop never
+    stalls.
+  </p>
+  <table class="providers">
+    <thead>
+      <tr>
+        <th>Task</th>
+        <th>Default provider</th>
+        <th>Default model</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>SOCRATIC_DIALOGUE</code></td>
+        <td>Ollama (local)</td>
+        <td>llama3.2 &mdash; <span class="rec">free + instant</span></td>
+      </tr>
+      <tr>
+        <td><code>BLOCK_GENERATION</code></td>
+        <td>OpenRouter</td>
+        <td>z-ai/glm-4.5-air &mdash; <span class="rec">cheap prose</span></td>
+      </tr>
+      <tr>
+        <td><code>CHECK_GENERATION</code></td>
+        <td>OpenRouter</td>
+        <td>z-ai/glm-4.5-air</td>
+      </tr>
+      <tr>
+        <td><code>RUBRIC_EVALUATION</code></td>
+        <td>Anthropic</td>
+        <td>claude-haiku-4-5 &mdash; <span class="rec">accuracy-critical</span></td>
+      </tr>
+      <tr>
+        <td><code>PATHWAY_PLANNING</code></td>
+        <td>OpenRouter</td>
+        <td>z-ai/glm-4.5-air</td>
+      </tr>
+      <tr>
+        <td><code>CONTENT_CLASSIFY</code></td>
+        <td>Ollama (local)</td>
+        <td>llama3.2 &mdash; <span class="rec">never network</span></td>
+      </tr>
+      <tr>
+        <td><code>DREAM_CONSOLIDATION</code></td>
+        <td>OpenRouter</td>
+        <td>z-ai/glm-4.5-air &mdash; <span class="rec">overnight batch</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Missing API keys don't crash the router &mdash; they just fall through the
+    chain. For a fully offline deployment, install Ollama with llama3.2 and
+    leave the other keys unset. Stuart still works; it just uses Ollama for
+    every task kind instead of the default split.
+  </p>
+  <p>
+    Reachability is not probed at construction time. The router only knows
+    presence or absence of an API key. Real network health checks land behind
+    <code>clawstu doctor --ping</code>.
+  </p>
+</section>
+
+<!-- ── Commands ────────────────────────────────────── -->
+<section id="commands">
+  <h2>Commands</h2>
+  <pre>
+clawstu serve [--host 127.0.0.1] [--port 8000]   # FastAPI + scheduler
+clawstu doctor [--ping]                          # self-diagnosis
+clawstu scheduler run-once --task &lt;name&gt;         # run one proactive task
+clawstu profile export &lt;learner_id&gt; --out ...    # export portable profile
+clawstu profile import &lt;path&gt;                    # restore a profile tarball
+clawstu --help                                   # full help text</pre>
+  <p>
+    <code>doctor</code> is a pure static config dump by default. It never
+    touches the network. Pass <code>--ping</code> to opt in to real
+    reachability checks. This guarantee is enforced by
+    <code>test_doctor_without_ping_does_not_make_network_calls</code>, which
+    monkey-patches <code>httpx.Client.post</code> to raise on any invocation.
+  </p>
+</section>
+
+<!-- ── HTTP API ────────────────────────────────────── -->
+<section>
+  <h2>HTTP API</h2>
+  <p>
+    Everything is also reachable over HTTP via the FastAPI app. All
+    student-text routes go through <code>InboundSafetyGate</code> first.
+  </p>
+  <pre>
+POST   /sessions                              # onboard a learner
+GET    /sessions/{session_id}                 # current state
+POST   /sessions/{id}/calibration-answer      # submit calibration answer
+POST   /sessions/{id}/finish-calibration      # transition to teach loop
+POST   /sessions/{id}/next                    # next directive
+POST   /sessions/{id}/check-answer            # submit check answer
+POST   /sessions/{id}/socratic                # free-form dialogue
+POST   /sessions/{id}/close                   # close + write to brain
+
+GET    /learners/{id}/wiki/{concept}          # per-student concept wiki
+POST   /learners/{id}/resume                  # warm-start (pre-gen'd)
+GET    /learners/{id}/queue                   # scheduler queue for learner
+POST   /learners/{id}/capture                 # student-shared source
+
+GET    /admin/scheduler                       # scheduler status
+GET    /admin/health                          # process health</pre>
+  <p>
+    Learner routes are gated by a shared-secret bearer token when
+    <code>STU_LEARNER_AUTH_TOKEN</code> is set in the environment. Without
+    the env var, auth is a no-op &mdash; single-household dev mode. Per-learner
+    JWTs are a post-MVP concern.
+  </p>
+</section>
+
+<!-- ── Contributing ────────────────────────────────── -->
+<section id="contributing">
+  <h2>Contributing</h2>
+  <p>
+    Claw-STU is built in public and ships in 7 phases. Contributions are
+    welcome.
+  </p>
+
+  <h3>Getting started</h3>
+  <pre>
+git clone https://github.com/SirhanMacx/Claw-STU.git
+cd Claw-STU
+pip install -e ".[dev]"
+pytest                         # 373 tests, under 2s
+mypy clawstu                   # strict, 81 files
+ruff check clawstu tests       # clean</pre>
+
+  <h3>Where to help</h3>
+  <ul class="plain">
+    <li>
+      <a href="https://github.com/SirhanMacx/Claw-STU/issues">Issues</a> &mdash;
+      bug reports and feature requests
+    </li>
+    <li>
+      <a href="https://github.com/SirhanMacx/Claw-STU/discussions">Discussions</a> &mdash;
+      questions, ideas, show and tell
+    </li>
+  </ul>
+
+  <h3>Things we'd especially appreciate</h3>
+  <ul class="plain">
+    <li>Real ONNX MiniLM bootstrap for the embeddings layer (Phase 4 ships a NullEmbeddings stub)</li>
+    <li>Per-learner iteration in the scheduler (Phase 6 fires each task with a <code>*</code> sentinel)</li>
+    <li>Live-content priming for <code>prepare_next_session</code> (Phase 6 writes a placeholder artifact)</li>
+    <li>Full pedagogical ZPD recomputation in <code>refresh_zpd</code></li>
+    <li>Multi-learner auth (post-MVP per-learner JWTs)</li>
+    <li>Additional language-domain seed libraries</li>
+  </ul>
+</section>
+
+<!-- ── Footer ──────────────────────────────────────── -->
+<footer>
+  <p>
+    <a href="https://github.com/SirhanMacx/Claw-STU">GitHub</a> &middot;
+    <a href="https://pypi.org/project/clawstu/">PyPI</a> &middot;
+    <a href="https://sirhanmacx.github.io/Claw-ED/">Claw-ED</a> &middot;
+    <a href="https://github.com/SirhanMacx/Claw-STU/issues">Issues</a> &middot;
+    <a href="https://github.com/SirhanMacx/Claw-STU/discussions">Discussions</a>
+  </p>
+  <p style="margin-top: 0.5rem;">
+    MIT License &middot; v0.1.0 &middot; Made by a teacher, for learners.
+  </p>
+</footer>
+
+</div>
+</body>
+</html>
