@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from clawstu.api.rate_limit import reset_rate_state
@@ -11,6 +13,10 @@ from clawstu.orchestrator.providers import EchoProvider, LLMProvider
 from clawstu.orchestrator.router import ModelRouter
 from clawstu.persistence.store import InMemoryPersistentStore
 from clawstu.profile.model import Domain, LearnerProfile
+
+# Default auth mode is now "generate" — tests need "dev" to avoid
+# requiring tokens on every HTTP request.
+os.environ.setdefault("STU_AUTH_MODE", "dev")
 
 
 @pytest.fixture(autouse=True)

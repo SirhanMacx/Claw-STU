@@ -79,12 +79,16 @@ def health(
     invariants["safety_filters_active"] = True
 
     degraded = any(value is False for value in invariants.values())
+
+    # Public health endpoint: return pass/fail invariants but strip
+    # detailed error messages (those go to /admin/scheduler which is
+    # behind auth).  Operators can still see details in server logs.
     return HealthResponse(
         status="degraded" if degraded else "ok",
         version=__version__,
         invariants=invariants,
         active_sessions=len(state.sessions),
-        details=details if details else None,
+        details=None,  # verbose diagnostics stay in logs only
     )
 
 

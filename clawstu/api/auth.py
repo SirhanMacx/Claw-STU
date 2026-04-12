@@ -20,9 +20,10 @@ Auth modes (controlled by ``STU_AUTH_MODE`` env var):
   unset, the dependency is a no-op.  Suitable for local loopback
   development only.
 
-When ``STU_AUTH_MODE`` is *not* set the default is ``dev``.
-Production deployments MUST set ``STU_AUTH_MODE=enforce`` or
-``STU_AUTH_MODE=generate`` explicitly.
+When ``STU_AUTH_MODE`` is *not* set the default is ``generate`` —
+a cryptographically random token is created on first startup and
+saved to ``~/.claw-stu/api_token``.  Developers who want the old
+wide-open behavior must explicitly set ``STU_AUTH_MODE=dev``.
 
 The ``learner_id`` path parameter is accepted so the dependency can be
 attached to routes shaped ``/learners/{learner_id}/...``, but it is
@@ -60,17 +61,17 @@ def _resolve_mode() -> str:
 
     Resolution order:
     1. ``STU_AUTH_MODE`` if explicitly set to a valid mode.
-    2. Default to ``dev`` (safe for local development).
+    2. Default to ``generate`` — auto-creates a token on first run.
 
-    Production deployments MUST set ``STU_AUTH_MODE=enforce`` or
-    ``STU_AUTH_MODE=generate`` explicitly. We no longer sniff
-    ``UVICORN_HOST`` because that is fragile and unreliable when
-    behind reverse proxies or inside containers.
+    The default was changed from ``dev`` to ``generate`` so that
+    fresh installs are never accidentally wide-open.  Developers
+    who want the old no-auth behavior must explicitly opt in with
+    ``STU_AUTH_MODE=dev``.
     """
     explicit = os.environ.get(_MODE_ENV_VAR, "").strip().lower()
     if explicit in _VALID_MODES:
         return explicit
-    return "dev"
+    return "generate"
 
 
 def _get_or_generate_token() -> str:
