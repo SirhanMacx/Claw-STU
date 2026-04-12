@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse
 from starlette.staticfiles import StaticFiles
 
 from clawstu import __version__
-from clawstu.api import admin, learners, profile, session
+from clawstu.api import admin, learners, profile, quick, session
 from clawstu.api.state import AppState, get_state
 from clawstu.memory.store import BrainStore
 from clawstu.orchestrator.config import AppConfig, load_config
@@ -163,6 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(admin.router)
     app.include_router(learners.router)
+    app.include_router(quick.router)
 
     # ── Web UI ──────────────────────────────────────────────────────
     if _STATIC_DIR.is_dir():

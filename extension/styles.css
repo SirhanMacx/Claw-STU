@@ -1,0 +1,6 @@
+/* Claw-STU Chrome Extension — content script styles.
+ *
+ * Minimal styles injected into pages. Currently empty — the extension
+ * UI lives in the popup, not in page content. This file exists so the
+ * manifest.json content_scripts declaration is valid.
+ */
