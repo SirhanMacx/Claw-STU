@@ -38,7 +38,7 @@
   "applicationCategory": "EducationalApplication",
   "operatingSystem": "macOS, Windows, Linux",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "softwareVersion": "0.1.1",
+  "softwareVersion": "0.2.0",
   "author": {
     "@type": "Organization",
     "name": "Claw-STU",
@@ -517,14 +517,11 @@ footer a:hover { color: var(--text-bright); }
     <span class="comment"># install from PyPI</span><br>
     <span class="prompt">$ </span><span class="cmd">pip install clawstu</span><br>
     <br>
-    <span class="comment"># self-diagnosis: config, provider chain, data dir</span><br>
-    <span class="prompt">$ </span><span class="cmd">clawstu doctor</span><br>
+    <span class="comment"># pick your AI provider (Anthropic, OpenAI, Ollama, OpenRouter)</span><br>
+    <span class="prompt">$ </span><span class="cmd">clawstu setup</span><br>
     <br>
-    <span class="comment"># start the FastAPI server (localhost-only by default)</span><br>
-    <span class="prompt">$ </span><span class="cmd">clawstu serve</span><br>
-    <br>
-    <span class="comment"># run the nightly scheduler tasks on demand</span><br>
-    <span class="prompt">$ </span><span class="cmd">clawstu scheduler run-once --task dream_cycle</span>
+    <span class="comment"># start learning — any topic, any subject</span><br>
+    <span class="prompt">$ </span><span class="cmd">clawstu</span>
   </div>
   <p>
     First run creates <code>~/.claw-stu/</code> with 0700 permissions, loads
@@ -544,9 +541,9 @@ footer a:hover { color: var(--text-bright); }
 <section>
   <h2>The MVP at a glance</h2>
   <div class="stats">
-    <div class="stat"><span class="value">373</span><span class="label">Tests</span></div>
-    <div class="stat"><span class="value">89%</span><span class="label">Coverage</span></div>
-    <div class="stat"><span class="value">81</span><span class="label">Source files</span></div>
+    <div class="stat"><span class="value">457</span><span class="label">Tests</span></div>
+    <div class="stat"><span class="value">88%</span><span class="label">Coverage</span></div>
+    <div class="stat"><span class="value">85</span><span class="label">Source files</span></div>
     <div class="stat"><span class="value">0</span><span class="label">type: ignore</span></div>
   </div>
   <p style="font-size: 0.88rem; color: var(--text-muted); text-align: center;">
@@ -565,27 +562,32 @@ footer a:hover { color: var(--text-bright); }
       clawstu
     </div>
     <div class="terminal-body">
-<span class="prompt">$ </span><span class="cmd">clawstu doctor</span>
-<span class="output">clawstu doctor &mdash; Phase 1 baseline</span>
-<span class="ok">  config load: ok</span>
-<span class="output">    data_dir: /Users/you/.claw-stu</span>
-<span class="output">    primary_provider: ollama</span>
-<span class="output">    fallback_chain: ['ollama', 'openai', 'anthropic', 'openrouter']</span>
-<span class="output">  provider reachability: skipped (pass --ping to try)</span>
-<span class="output">  sqlite + FTS5: DEFERRED (Phase 3)</span>
-<span class="output">  embeddings model: DEFERRED (Phase 4)</span>
+<span class="prompt">$ </span><span class="cmd">clawstu</span>
+<span class="output">Hi. I'm Stuart.</span>
+<span class="output">I'm a personal learning agent. I'll help you learn about anything</span>
+<span class="output">you want. Real topics, real content, adapted to how you learn.</span>
 <br>
-<span class="prompt">$ </span><span class="cmd">clawstu serve --host 127.0.0.1 --port 8000</span>
-<span class="output">starting uvicorn on 127.0.0.1:8000</span>
-<span class="output">scheduler: 5 tasks loaded (dream_cycle, prepare_next_session,</span>
-<span class="output">                           spaced_review, refresh_zpd, prune_stale)</span>
-<span class="highlight">ready.</span>
+<span class="highlight">What's your name?</span> <span class="cmd">Ada</span>
+<span class="highlight">How old are you?</span> <span class="cmd">15</span>
+<span class="highlight">What would you like to learn about today?</span>
+<span class="output">  Try: the Haitian Revolution, photosynthesis, supply and demand</span>
+<span class="cmd">  The Haitian Revolution</span>
 <br>
-<span class="prompt">$ </span><span class="cmd">curl -X POST localhost:8000/sessions \</span>
-<span class="cmd">    -d '{"learner_id":"ada","age":15,"domain":"global_history",</span>
-<span class="cmd">         "topic":"The Haitian Revolution"}'</span>
-<span class="output">{"session_id":"7f2a...","phase":"teaching","block":{...},</span>
-<span class="output"> "check_item":{"type":"crq","prompt":"In your own words..."}}</span>
+<span class="ok">&gt; Setting up your session...</span>
+<span class="ok">  ✓ Topic: The Haitian Revolution</span>
+<span class="ok">  ✓ Age bracket: late_high</span>
+<span class="ok">  ✓ Provider: ollama/llama3.2 (local)</span>
+<br>
+<span class="output">&gt; Block 1 · primary_source · ~10 min</span>
+<span class="output">The Haitian Revolution began in 1791 on the French colony of</span>
+<span class="output">Saint-Domingue. Over 500,000 enslaved Africans worked the</span>
+<span class="output">plantations — nearly 90% of the island's population...</span>
+<br>
+<span class="output">&gt; Check</span>
+<span class="output">In your own words, what made Saint-Domingue's labor system</span>
+<span class="output">different from other French colonies?</span>
+<span class="cmd">  The scale — almost everyone was enslaved</span>
+<span class="ok">  ✓ Correct. Moving to the next block.</span>
     </div>
   </div>
 </section>
@@ -823,12 +825,20 @@ footer a:hover { color: var(--text-bright); }
 <section id="commands">
   <h2>Commands</h2>
   <pre>
-clawstu serve [--host 127.0.0.1] [--port 8000]   # FastAPI + scheduler
+clawstu                                          # start a learning session
+clawstu learn "photosynthesis"                   # learn a specific topic
+clawstu resume &lt;learner_id&gt;                      # warm-start from last session
+clawstu ask "What is a primary source?"          # one-shot Socratic question
+clawstu wiki &lt;concept&gt;                           # per-student concept notes
+clawstu progress                                 # learner dashboard (ZPD, modality)
+clawstu history                                  # past sessions
+clawstu review                                   # concepts due for review
+clawstu setup                                    # pick your AI provider
+clawstu serve                                    # web UI at localhost:8000
 clawstu doctor [--ping]                          # self-diagnosis
-clawstu scheduler run-once --task &lt;name&gt;         # run one proactive task
-clawstu profile export &lt;learner_id&gt; --out ...    # export portable profile
-clawstu profile import &lt;path&gt;                    # restore a profile tarball
-clawstu --help                                   # full help text</pre>
+clawstu profile export &lt;id&gt; --out profile.tar.gz # portable profile
+clawstu profile import profile.tar.gz            # restore a profile
+clawstu scheduler run-once --task &lt;name&gt;         # run a proactive task</pre>
   <p>
     <code>doctor</code> is a pure static config dump by default. It never
     touches the network. Pass <code>--ping</code> to opt in to real
@@ -920,7 +930,7 @@ ruff check clawstu tests       # clean</pre>
     <a href="https://github.com/SirhanMacx/Claw-STU/discussions">Discussions</a>
   </p>
   <p style="margin-top: 0.5rem;">
-    MIT License &middot; v0.1.1 &middot; Made by a teacher, for learners.
+    MIT License &middot; v0.2.0 &middot; Made by a teacher, for learners.
   </p>
 </footer>
 
