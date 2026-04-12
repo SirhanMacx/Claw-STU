@@ -51,6 +51,16 @@ def test_onboard_returns_calibration_items(client: TestClient) -> None:
     assert len(body["calibration_items"]) >= 1
 
 
+def test_profile_get_unknown_session_returns_404(client: TestClient) -> None:
+    response = client.get("/profile/nonexistent-session-id")
+    assert response.status_code == 404
+
+
+def test_profile_export_unknown_session_returns_404(client: TestClient) -> None:
+    response = client.get("/profile/nonexistent-session-id/export")
+    assert response.status_code == 404
+
+
 def test_profile_export_returns_attachment(client: TestClient) -> None:
     onboard = client.post(
         "/sessions",

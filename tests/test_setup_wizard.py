@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -32,6 +33,11 @@ from clawstu.orchestrator.provider_openrouter import OpenRouterProvider
 from clawstu.orchestrator.providers import LLMProvider
 from clawstu.setup_wizard import (
     SetupError,
+    _api_key_field,
+    _default_base_url,
+    _default_provider_factory,
+    _ping_ollama,
+    _TyperIO,
     run_setup,
     secrets_mode,
     secrets_path_for,
@@ -711,3 +717,267 @@ def test_wizard_ollama_unreachable_warning(
         "ollama_base_url": "http://unreachable:11434",
     }
     assert any("Could not reach" in line for line in fake_io.echoes)
+
+
+# ---------------------------------------------------------------------------
+# _default_provider_factory coverage (lines 155-165)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultProviderFactory:
+    """Test each branch of _default_provider_factory."""
+
+    def test_factory_anthropic(self) -> None:
+        provider = _default_provider_factory("anthropic", "key", "http://x")
+        assert isinstance(provider, AnthropicProvider)
+
+    def test_factory_openai(self) -> None:
+        provider = _default_provider_factory("openai", "key", "http://x")
+        assert isinstance(provider, OpenAIProvider)
+
+    def test_factory_openrouter(self) -> None:
+        provider = _default_provider_factory("openrouter", "key", "http://x")
+        assert isinstance(provider, OpenRouterProvider)
+
+    def test_factory_google(self) -> None:
+        provider = _default_provider_factory("google", "key", "http://x")
+        assert isinstance(provider, GoogleProvider)
+
+    def test_factory_ollama(self) -> None:
+        provider = _default_provider_factory("ollama", None, "http://x")
+        assert isinstance(provider, OllamaProvider)
+
+    def test_factory_unknown_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown provider for factory"):
+            _default_provider_factory("banana", "key", "http://x")
+
+
+# ---------------------------------------------------------------------------
+# _api_key_field and _default_base_url coverage (lines 370-372, 382-386)
+# ---------------------------------------------------------------------------
+
+
+class TestApiKeyField:
+    """Cover the google branch of _api_key_field (line 370-372)."""
+
+    def test_google_field(self) -> None:
+        key, label = _api_key_field("google")
+        assert key == "google_api_key"
+        assert label == "Google Gemini"
+
+    def test_unknown_raises(self) -> None:
+        with pytest.raises(ValueError, match="no api-key field"):
+            _api_key_field("banana")
+
+
+class TestDefaultBaseUrl:
+    """Cover the google and ollama branches of _default_base_url."""
+
+    def test_google_base_url(self) -> None:
+        cfg = AppConfig()
+        url = _default_base_url("google", cfg)
+        assert url == cfg.google_base_url
+
+    def test_ollama_base_url(self) -> None:
+        cfg = AppConfig()
+        url = _default_base_url("ollama", cfg)
+        assert url == cfg.ollama_base_url
+
+    def test_unknown_raises(self) -> None:
+        with pytest.raises(ValueError, match="no default base URL"):
+            _default_base_url("banana", AppConfig())
+
+
+# ---------------------------------------------------------------------------
+# _TyperIO coverage (lines 130-134, 137-140, 143)
+# ---------------------------------------------------------------------------
+
+
+class TestTyperIO:
+    """Exercise _TyperIO by mocking typer functions underneath."""
+
+    def test_prompt_delegates_to_typer(self) -> None:
+        io = _TyperIO()
+        with patch("clawstu.setup_wizard.typer.prompt", return_value="test") as m:
+            result = io.prompt("Enter value", hide_input=True, default="x")
+        assert result == "test"
+        m.assert_called_once_with("Enter value", hide_input=True, default="x")
+
+    def test_echo_plain(self) -> None:
+        io = _TyperIO()
+        with patch("clawstu.setup_wizard.typer.echo") as m:
+            io.echo("hello")
+        m.assert_called_once_with("hello")
+
+    def test_echo_with_color(self) -> None:
+        io = _TyperIO()
+        with patch("clawstu.setup_wizard.typer.secho") as m:
+            io.echo("colorful", color="green")
+        m.assert_called_once_with("colorful", fg="green")
+
+    def test_confirm_delegates_to_typer(self) -> None:
+        io = _TyperIO()
+        with patch("clawstu.setup_wizard.typer.confirm", return_value=True) as m:
+            result = io.confirm("Are you sure?", default=False)
+        assert result is True
+        m.assert_called_once_with("Are you sure?", default=False)
+
+
+# ---------------------------------------------------------------------------
+# Google provider flow through the wizard (interactive)
+# ---------------------------------------------------------------------------
+
+
+def test_wizard_writes_secrets_for_google(
+    isolated_data_dir: Path,
+) -> None:
+    """Google Gemini flow writes google_api_key to secrets.json."""
+    fake_io = _FakeIO(answers=["4", "AIza-test-google-key"])
+    factory = _make_mock_provider_factory(
+        response_json={
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "ok"}], "role": "model"},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 1,
+                "candidatesTokenCount": 1,
+            },
+        },
+    )
+    run_setup(interactive=True, io=fake_io, provider_factory=factory)
+    secrets = isolated_data_dir / "secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload == {
+        "primary_provider": "google",
+        "google_api_key": "AIza-test-google-key",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Non-interactive Google and OpenRouter (covers _api_key_field branches)
+# ---------------------------------------------------------------------------
+
+
+def test_wizard_non_interactive_google_with_api_key(
+    isolated_data_dir: Path,
+) -> None:
+    """Non-interactive Google writes the google_api_key."""
+    fake_io = _FakeIO()
+    run_setup(
+        interactive=False,
+        io=fake_io,
+        provider_override="google",
+        api_key_override="AIza-test",
+    )
+    secrets = isolated_data_dir / "secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload == {
+        "primary_provider": "google",
+        "google_api_key": "AIza-test",
+    }
+
+
+def test_wizard_non_interactive_openrouter_with_api_key(
+    isolated_data_dir: Path,
+) -> None:
+    """Non-interactive OpenRouter writes the openrouter_api_key."""
+    fake_io = _FakeIO()
+    run_setup(
+        interactive=False,
+        io=fake_io,
+        provider_override="openrouter",
+        api_key_override="sk-or-test",
+    )
+    secrets = isolated_data_dir / "secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload == {
+        "primary_provider": "openrouter",
+        "openrouter_api_key": "sk-or-test",
+    }
+
+
+# ---------------------------------------------------------------------------
+# _ping_ollama direct tests (lines 454-459)
+# ---------------------------------------------------------------------------
+
+
+def test_ping_ollama_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_ping_ollama returns True when daemon responds with < 500 status."""
+
+    def mock_get(self: Any, url: str) -> httpx.Response:
+        return httpx.Response(200, json={"models": []})
+
+    monkeypatch.setattr(httpx.Client, "get", mock_get)
+    assert _ping_ollama("http://localhost:11434") is True
+
+
+def test_ping_ollama_server_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_ping_ollama returns False on 500+ status."""
+
+    def mock_get(self: Any, url: str) -> httpx.Response:
+        return httpx.Response(500)
+
+    monkeypatch.setattr(httpx.Client, "get", mock_get)
+    assert _ping_ollama("http://localhost:11434") is False
+
+
+def test_ping_ollama_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_ping_ollama returns False when connection fails."""
+
+    def mock_get(self: Any, url: str) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx.Client, "get", mock_get)
+    assert _ping_ollama("http://localhost:11434") is False
+
+
+# ---------------------------------------------------------------------------
+# Constructor error + retry in _collect_api_key_provider (lines 335-339)
+# ---------------------------------------------------------------------------
+
+
+def test_wizard_handles_constructor_error_and_retries(
+    isolated_data_dir: Path,
+) -> None:
+    """When the provider factory raises ValueError, wizard offers retry."""
+    call_count = {"n": 0}
+
+    def factory(
+        name: str, api_key: str | None, base_url: str,
+    ) -> LLMProvider:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise ValueError("bad key format")
+        # Second call succeeds — return a mock-transport-backed provider.
+        return _make_mock_provider_factory()(name, api_key, base_url)
+
+    # First key triggers constructor error, confirm retry, second key works.
+    fake_io = _FakeIO(
+        answers=["1", "bad-key", "sk-ant-good"],
+        confirms=[True],
+    )
+    run_setup(interactive=True, io=fake_io, provider_factory=factory)
+    secrets = isolated_data_dir / "secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload["anthropic_api_key"] == "sk-ant-good"
+
+
+def test_wizard_constructor_error_abort_re_raises(
+    isolated_data_dir: Path,
+) -> None:
+    """When factory raises and user declines retry, the error propagates."""
+
+    def factory(
+        name: str, api_key: str | None, base_url: str,
+    ) -> LLMProvider:
+        raise ValueError("always broken")
+
+    fake_io = _FakeIO(
+        answers=["1", "bad-key"],
+        confirms=[False],  # decline retry
+    )
+    with pytest.raises(ValueError, match="always broken"):
+        run_setup(interactive=True, io=fake_io, provider_factory=factory)
