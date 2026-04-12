@@ -328,10 +328,15 @@ def serve(
     Binds to 127.0.0.1 by default (localhost-only). Pass --host 0.0.0.0
     explicitly if you know what you're doing.
     """
-    typer.echo(f"clawstu serve: starting uvicorn on {host}:{port}")
-    typer.echo(
-        "NOTE: Phase 1 serve is a placeholder. Full lifespan with the "
-        "embedded scheduler lands in Phase 6."
+    import uvicorn
+
+    typer.echo(f"clawstu serve: starting on {host}:{port}")
+    typer.echo(f"Open http://{host}:{port}/docs for the interactive API.")
+    uvicorn.run(
+        "clawstu.api.main:app",
+        host=host,
+        port=port,
+        log_level="info",
     )
 
 

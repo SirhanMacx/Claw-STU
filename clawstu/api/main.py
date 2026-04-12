@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import HTMLResponse
 from starlette.staticfiles import StaticFiles
 
@@ -170,6 +170,15 @@ def create_app() -> FastAPI:
     def web_ui() -> str:
         index = _STATIC_DIR / "index.html"
         return index.read_text(encoding="utf-8")
+
+    # ── Root-level /health alias ─────────────��─────────────────────
+    # README promises ``GET /health``; the canonical endpoint lives at
+    # ``/admin/health``. This alias keeps both paths valid.
+    @app.get("/health", response_model=admin.HealthResponse)
+    def health_alias(
+        state: AppState = Depends(get_state),
+    ) -> admin.HealthResponse:
+        return admin.health(state)
 
     return app
 

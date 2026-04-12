@@ -616,7 +616,21 @@ def run_ask(question: str, learner_id: str | None) -> None:
                 if client is not None and hasattr(client, "aclose"):
                     await client.aclose()
 
-    answer = asyncio.run(_ask_and_cleanup())
+    from clawstu.orchestrator.providers import ProviderError
+
+    try:
+        answer = asyncio.run(_ask_and_cleanup())
+    except ProviderError as exc:
+        console.print(
+            Panel(
+                f"Provider error: {exc}\n\n"
+                "Tip: run `clawstu doctor --ping` to check provider reachability, "
+                "or `clawstu setup` to reconfigure.",
+                title="Stuart",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1) from None
     console.print(
         Panel(
             Markdown(answer),
