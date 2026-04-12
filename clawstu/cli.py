@@ -25,7 +25,15 @@ from __future__ import annotations
 
 import typer
 
+from clawstu import __version__
 from clawstu.setup_wizard import SetupError, run_setup
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"clawstu {__version__}")
+        raise typer.Exit
+
 
 app: typer.Typer = typer.Typer(
     name="clawstu",
@@ -50,7 +58,16 @@ app.add_typer(profile_app, name="profile")
 
 
 @app.callback()
-def main_callback(ctx: typer.Context) -> None:
+def main_callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Print the version and exit.",
+    ),
+) -> None:
     """Default dispatch: ``clawstu`` with no subcommand runs ``learn``.
 
     The callback runs on every invocation, but only routes to
