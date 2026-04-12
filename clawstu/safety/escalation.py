@@ -113,7 +113,7 @@ class EscalationHandler:
 
         This message is intentionally not pedagogical. Stuart steps
         fully out of the tutor role here. We name specific US-based
-        resources; localized resource lists are a post-MVP TODO.
+        resources; NOTE: localized resource lists are a known limitation — currently US-only. See docs/CONFIG_RESOLUTION.md.
         """
         if not detection.detected:
             raise ValueError("resources() called with no detection")

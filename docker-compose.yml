@@ -16,5 +16,17 @@ services:
       # - GOOGLE_API_KEY=AIza...
       # - OLLAMA_BASE_URL=http://host.docker.internal:11434
 
+  # Telegram bot — uncomment and set TELEGRAM_BOT_TOKEN to enable.
+  # stuart-bot:
+  #   build: .
+  #   volumes:
+  #     - stuart-data:/data/.claw-stu
+  #   environment:
+  #     - CLAW_STU_DATA_DIR=/data/.claw-stu
+  #     - TELEGRAM_BOT_TOKEN=changeme
+  #   command: ["clawstu", "bot"]
+  #   depends_on:
+  #     - stuart
+
 volumes:
   stuart-data:

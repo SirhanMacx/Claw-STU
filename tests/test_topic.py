@@ -1,4 +1,4 @@
-"""Tests for src/curriculum/topic.py.
+"""Tests for clawstu/curriculum/topic.py.
 
 `Topic` is the small validated wrapper around a student-provided free-text
 learning topic. It is referenced by the (future) live-content path that

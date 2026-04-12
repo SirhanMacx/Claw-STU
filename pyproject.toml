@@ -53,6 +53,9 @@ dev = [
     "mypy>=1.10",
 ]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["Handoff.md"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["clawstu"]
 

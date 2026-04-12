@@ -4,7 +4,7 @@
 
 Claw-STU is a personal learning agent. Stuart lives in your terminal and on a local web server, running adaptive learning sessions that calibrate to each student's level and remember what works.
 
-This document describes the v0.2 architecture -- how sessions flow through the system, what each module does, and how components connect.
+This document describes the v4.12.2026.1 architecture -- how sessions flow through the system, what each module does, and how components connect.
 
 ---
 

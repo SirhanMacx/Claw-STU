@@ -27,8 +27,8 @@ machine. There are no ads, no data sales, no third-party behavioral tracking
 - **Windows does not enforce POSIX permissions.** On Windows, Claw-STU
   logs a warning on first load and suggests protecting `~/.claw-stu/` via
   NTFS ACLs or a user-only profile location
-- On macOS, keys can optionally use the system Keychain via
-  `pip install clawstu[keyring]` (post-Phase-1)
+- On macOS, Keyring integration is planned for a future release.
+  (The `clawstu[keyring]` extra is not yet available.)
 - Keys are **never** logged, transmitted, or included in generated output
 - Keys in environment variables override file-based keys
 

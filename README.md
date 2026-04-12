@@ -12,6 +12,7 @@ An open-source personal learning agent (persona name: **Stuart**) that adapts to
   <a href="https://github.com/SirhanMacx/Claw-STU/actions/workflows/ci.yml"><img src="https://github.com/SirhanMacx/Claw-STU/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="MIT"></a>
   <a href="https://github.com/SirhanMacx/Claw-STU/stargazers"><img src="https://img.shields.io/github/stars/SirhanMacx/Claw-STU?style=social" alt="Stars"></a>
+  <a href="https://pepy.tech/project/clawstu"><img src="https://static.pepy.tech/badge/clawstu" alt="Downloads"></a>
 </p>
 
 ```bash
@@ -200,13 +201,13 @@ PRs welcome. Built by a teacher in New York. Every design choice lives in `docs/
 
 | Tier | Features |
 |---|---|
-| **Stable** | Adaptive session loop, ZPD calibration, modality rotation, 5 LLM providers (Anthropic / OpenAI / Google / Ollama / OpenRouter), ModelRouter with fallback chain, InboundSafetyGate + CRISIS_PAUSE, brain pages + dream cycle, SQLite persistence, topic-aware live-content onboarding (REST + WebSocket), Socratic dialogue via ReasoningChain, `clawstu learn` CLI, `clawstu setup` wizard, profile export/import |
+| **Stable** | Adaptive session loop, ZPD calibration, modality rotation, 5 LLM providers (Anthropic / OpenAI / Google Gemini via REST API — no SDK required / Ollama / OpenRouter), ModelRouter with fallback chain, InboundSafetyGate + CRISIS_PAUSE, brain pages + dream cycle, SQLite persistence, topic-aware live-content onboarding (REST + WebSocket), Socratic dialogue via ReasoningChain, `clawstu learn` CLI, `clawstu setup` wizard, profile export/import |
 | **Beta** | Web UI at localhost:8000, Telegram bot, Chrome extension, MCP server, WebSocket live sessions, per-student concept wiki, spaced review, scheduler (5 nightly tasks) |
 | **Experimental** | ONNX MiniLM embeddings (ships as NullEmbeddings stub; vector search degrades to keyword-only until real model is bootstrapped), per-learner scheduler iteration |
 
 ## Status
 
-v4.12.2026 on PyPI. 530 tests, mypy `--strict` clean on 89 source files, under 2 seconds runtime. CI green on Python 3.11 + 3.12.
+v4.12.2026 on PyPI. 655 tests, mypy `--strict` clean on 90 source files, under 2 seconds runtime. CI green on Python 3.11 + 3.12.
 
 ---
 
