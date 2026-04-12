@@ -580,3 +580,126 @@ def test_wizard_overwrites_existing_secrets_file(
     assert payload == {"primary_provider": "echo"}
     assert "openai_api_key" not in payload
     assert secrets_mode(pre_existing) == 0o600
+
+
+def test_wizard_re_prompts_on_empty_api_key(
+    isolated_data_dir: Path,
+) -> None:
+    """An empty API key string surfaces a hint and re-prompts.
+
+    Pin the empty-key branch in `_collect_api_key_provider` so a
+    silent skip in the future would fail this test loud.
+    """
+    fake_io = _FakeIO(answers=["1", "", "sk-ant-actual"])
+    run_setup(
+        interactive=True,
+        io=fake_io,
+        provider_factory=_make_mock_provider_factory(),
+    )
+    secrets = isolated_data_dir / "secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload["anthropic_api_key"] == "sk-ant-actual"
+    assert any("required" in line for line in fake_io.echoes)
+
+
+def test_wizard_save_anyway_after_repeated_failure(
+    isolated_data_dir: Path,
+) -> None:
+    """Operator declines retry then accepts save-anyway -- key is written.
+
+    This pins the documented escape hatch: a teacher onboarding a
+    laptop with a flaky network can save the key and run the wizard
+    again later. Without this branch, a transient 5xx would force
+    them to abort and re-enter their key from scratch.
+    """
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text='{"error":"upstream"}')
+
+    transport = httpx.MockTransport(handler)
+
+    def factory(
+        name: str, api_key: str | None, base_url: str,
+    ) -> LLMProvider:
+        client = httpx.AsyncClient(transport=transport)
+        return AnthropicProvider(
+            api_key=api_key, base_url=base_url, client=client,
+        )
+
+    # answers: pick anthropic, then key. confirms: decline retry, accept save.
+    fake_io = _FakeIO(
+        answers=["1", "sk-ant-flaky"],
+        confirms=[False, True],
+    )
+    run_setup(interactive=True, io=fake_io, provider_factory=factory)
+    secrets = isolated_data_dir / "secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload == {
+        "primary_provider": "anthropic",
+        "anthropic_api_key": "sk-ant-flaky",
+    }
+
+
+def test_wizard_aborts_when_operator_declines_save_anyway(
+    isolated_data_dir: Path,
+) -> None:
+    """Decline retry AND decline save-anyway -> SetupError, no file written."""
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text='{"error":"auth"}')
+
+    transport = httpx.MockTransport(handler)
+
+    def factory(
+        name: str, api_key: str | None, base_url: str,
+    ) -> LLMProvider:
+        client = httpx.AsyncClient(transport=transport)
+        return AnthropicProvider(
+            api_key=api_key, base_url=base_url, client=client,
+        )
+
+    fake_io = _FakeIO(
+        answers=["1", "sk-ant-bad"],
+        confirms=[False, False],
+    )
+    with pytest.raises(SetupError, match="declined to save"):
+        run_setup(interactive=True, io=fake_io, provider_factory=factory)
+    assert not (isolated_data_dir / "secrets.json").exists()
+
+
+def test_wizard_non_interactive_ollama_with_base_url_override(
+    isolated_data_dir: Path,
+) -> None:
+    """Non-interactive Ollama with --base-url writes the override."""
+    fake_io = _FakeIO()
+    run_setup(
+        interactive=False,
+        io=fake_io,
+        provider_override="ollama",
+        base_url_override="http://custom.local:9999",
+    )
+    secrets = isolated_data_dir / "secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload == {
+        "primary_provider": "ollama",
+        "ollama_base_url": "http://custom.local:9999",
+    }
+
+
+def test_wizard_ollama_unreachable_warning(
+    isolated_data_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The interactive Ollama path warns but still saves when daemon is down."""
+    monkeypatch.setattr(setup_wizard, "_ping_ollama", lambda _url: False)
+    fake_io = _FakeIO(answers=["4", "http://unreachable:11434"])
+    run_setup(
+        interactive=True,
+        io=fake_io,
+        provider_factory=_make_mock_provider_factory(),
+    )
+    secrets = isolated_data_dir / "secrets.json"
+    payload = json.loads(secrets.read_text())
+    assert payload == {
+        "primary_provider": "ollama",
+        "ollama_base_url": "http://unreachable:11434",
+    }
+    assert any("Could not reach" in line for line in fake_io.echoes)
