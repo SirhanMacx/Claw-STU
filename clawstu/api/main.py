@@ -343,7 +343,8 @@ def create_app() -> FastAPI:
                 })
                 return None
             import json
-            return json.loads(raw)
+            result: dict[str, object] = json.loads(raw)
+            return result
 
         try:
             # 1. Wait for onboard message
