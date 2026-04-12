@@ -53,6 +53,7 @@ import typer
 
 from clawstu.orchestrator.config import AppConfig, ensure_data_dir, load_config
 from clawstu.orchestrator.provider_anthropic import AnthropicProvider
+from clawstu.orchestrator.provider_google import GoogleProvider
 from clawstu.orchestrator.provider_ollama import OllamaProvider
 from clawstu.orchestrator.provider_openai import OpenAIProvider
 from clawstu.orchestrator.provider_openrouter import OpenRouterProvider
@@ -66,6 +67,7 @@ _PROVIDER_MENU: tuple[tuple[str, str], ...] = (
     ("anthropic", "Anthropic (Claude -- best for rubric evaluation)"),
     ("openai", "OpenAI (GPT -- widely available)"),
     ("openrouter", "OpenRouter (access to GLM, Llama, Mistral, etc.)"),
+    ("google", "Google Gemini (fast, cheap, good for education content)"),
     ("ollama", "Ollama (run locally, free, private)"),
     ("echo", "Echo (offline demo mode -- stub content only, for testing)"),
 )
@@ -156,6 +158,8 @@ def _default_provider_factory(
         return OpenAIProvider(api_key=api_key, base_url=base_url)
     if name == "openrouter":
         return OpenRouterProvider(api_key=api_key, base_url=base_url)
+    if name == "google":
+        return GoogleProvider(api_key=api_key, base_url=base_url)
     if name == "ollama":
         return OllamaProvider(base_url=base_url, api_key=api_key)
     raise ValueError(f"unknown provider for factory: {name!r}")
@@ -363,6 +367,8 @@ def _api_key_field(name: str) -> tuple[str, str]:
         return "openai_api_key", "OpenAI"
     if name == "openrouter":
         return "openrouter_api_key", "OpenRouter"
+    if name == "google":
+        return "google_api_key", "Google Gemini"
     raise ValueError(f"no api-key field for provider {name!r}")
 
 
@@ -373,6 +379,8 @@ def _default_base_url(name: str, cfg: AppConfig) -> str:
         return cfg.openai_base_url
     if name == "openrouter":
         return cfg.openrouter_base_url
+    if name == "google":
+        return cfg.google_base_url
     if name == "ollama":
         return cfg.ollama_base_url
     raise ValueError(f"no default base URL for provider {name!r}")

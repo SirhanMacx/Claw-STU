@@ -119,6 +119,8 @@ class AppConfig(BaseModel):
     openai_base_url: str = "https://api.openai.com/v1"
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    google_api_key: str | None = None
+    google_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     # Session-layer settings.
     session_cache_size: int = 1024
 
@@ -237,6 +239,8 @@ def _apply_env_overrides(overrides: dict[str, object]) -> None:
         "OPENAI_BASE_URL": "openai_base_url",
         "OPENROUTER_API_KEY": "openrouter_api_key",
         "OPENROUTER_BASE_URL": "openrouter_base_url",
+        "GOOGLE_API_KEY": "google_api_key",
+        "GOOGLE_BASE_URL": "google_base_url",
         "STU_PRIMARY_PROVIDER": "primary_provider",
     }
     for env_name, field_name in env_map.items():

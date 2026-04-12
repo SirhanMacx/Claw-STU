@@ -21,6 +21,7 @@ from clawstu.orchestrator.live_content import (
 )
 from clawstu.orchestrator.prompts import PromptLibrary
 from clawstu.orchestrator.provider_anthropic import AnthropicProvider
+from clawstu.orchestrator.provider_google import GoogleProvider
 from clawstu.orchestrator.provider_ollama import OllamaProvider
 from clawstu.orchestrator.provider_openai import OpenAIProvider
 from clawstu.orchestrator.provider_openrouter import OpenRouterProvider
@@ -38,6 +39,7 @@ __all__ = [
     "AnthropicProvider",
     "AppConfig",
     "EchoProvider",
+    "GoogleProvider",
     "LLMMessage",
     "LLMProvider",
     "LLMResponse",

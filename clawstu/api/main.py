@@ -22,6 +22,7 @@ from clawstu.api.state import AppState, get_state
 from clawstu.memory.store import BrainStore
 from clawstu.orchestrator.config import AppConfig, load_config
 from clawstu.orchestrator.provider_anthropic import AnthropicProvider
+from clawstu.orchestrator.provider_google import GoogleProvider
 from clawstu.orchestrator.provider_ollama import OllamaProvider
 from clawstu.orchestrator.provider_openai import OpenAIProvider
 from clawstu.orchestrator.provider_openrouter import OpenRouterProvider
@@ -76,6 +77,11 @@ def build_providers(cfg: AppConfig) -> dict[str, LLMProvider]:
         providers["openrouter"] = OpenRouterProvider(
             api_key=cfg.openrouter_api_key,
             base_url=cfg.openrouter_base_url,
+        )
+    if cfg.google_api_key:
+        providers["google"] = GoogleProvider(
+            api_key=cfg.google_api_key,
+            base_url=cfg.google_base_url,
         )
     return providers
 

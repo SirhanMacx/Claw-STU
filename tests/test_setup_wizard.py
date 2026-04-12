@@ -25,6 +25,7 @@ import pytest
 from clawstu import setup_wizard
 from clawstu.orchestrator.config import AppConfig
 from clawstu.orchestrator.provider_anthropic import AnthropicProvider
+from clawstu.orchestrator.provider_google import GoogleProvider
 from clawstu.orchestrator.provider_ollama import OllamaProvider
 from clawstu.orchestrator.provider_openai import OpenAIProvider
 from clawstu.orchestrator.provider_openrouter import OpenRouterProvider
@@ -135,6 +136,10 @@ def _make_mock_provider_factory(
             return OpenRouterProvider(
                 api_key=api_key, base_url=base_url, client=client,
             )
+        if name == "google":
+            return GoogleProvider(
+                api_key=api_key, base_url=base_url, client=client,
+            )
         if name == "ollama":
             return OllamaProvider(
                 base_url=base_url, api_key=api_key, client=client,
@@ -160,6 +165,8 @@ def isolated_data_dir(
         "OPENAI_BASE_URL",
         "OPENROUTER_API_KEY",
         "OPENROUTER_BASE_URL",
+        "GOOGLE_API_KEY",
+        "GOOGLE_BASE_URL",
         "OLLAMA_API_KEY",
         "OLLAMA_BASE_URL",
         "STU_PRIMARY_PROVIDER",
@@ -274,7 +281,7 @@ def test_wizard_ollama_picks_base_url_and_does_not_require_api_key(
     # a real socket. The function lives in setup_wizard, so the
     # monkeypatch is local to the wizard and doesn't leak.
     monkeypatch.setattr(setup_wizard, "_ping_ollama", lambda _url: True)
-    fake_io = _FakeIO(answers=["4", "http://localhost:22222"])
+    fake_io = _FakeIO(answers=["5", "http://localhost:22222"])
 
     written = run_setup(
         interactive=True,
@@ -298,7 +305,7 @@ def test_wizard_echo_writes_secrets_with_primary_provider_echo(
     isolated_data_dir: Path,
 ) -> None:
     """Echo flow writes a single-key secrets payload and creates the dir."""
-    fake_io = _FakeIO(answers=["5"])
+    fake_io = _FakeIO(answers=["6"])
     written = run_setup(
         interactive=True,
         io=fake_io,
@@ -429,6 +436,7 @@ def test_wizard_creates_data_dir_with_0700_perms_if_missing(
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
+        "GOOGLE_API_KEY",
         "OLLAMA_API_KEY",
         "OLLAMA_BASE_URL",
         "STU_PRIMARY_PROVIDER",
@@ -438,7 +446,7 @@ def test_wizard_creates_data_dir_with_0700_perms_if_missing(
     monkeypatch.setenv("CLAW_STU_DATA_DIR", str(target))
     assert not target.exists()
 
-    fake_io = _FakeIO(answers=["5"])
+    fake_io = _FakeIO(answers=["6"])
     run_setup(
         interactive=True,
         io=fake_io,
@@ -546,7 +554,7 @@ def test_invalid_menu_choice_re_prompts(
     isolated_data_dir: Path,
 ) -> None:
     """A nonsense choice surfaces a hint and re-prompts."""
-    fake_io = _FakeIO(answers=["banana", "5"])
+    fake_io = _FakeIO(answers=["banana", "6"])
     run_setup(
         interactive=True,
         io=fake_io,
@@ -569,7 +577,7 @@ def test_wizard_overwrites_existing_secrets_file(
     )
     os.chmod(pre_existing, 0o600)
 
-    fake_io = _FakeIO(answers=["5"])
+    fake_io = _FakeIO(answers=["6"])
     run_setup(
         interactive=True,
         io=fake_io,
@@ -690,7 +698,7 @@ def test_wizard_ollama_unreachable_warning(
 ) -> None:
     """The interactive Ollama path warns but still saves when daemon is down."""
     monkeypatch.setattr(setup_wizard, "_ping_ollama", lambda _url: False)
-    fake_io = _FakeIO(answers=["4", "http://unreachable:11434"])
+    fake_io = _FakeIO(answers=["5", "http://unreachable:11434"])
     run_setup(
         interactive=True,
         io=fake_io,
