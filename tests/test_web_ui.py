@@ -43,3 +43,23 @@ def test_onboard_form_present_in_html() -> None:
     resp = client.get("/")
     assert resp.status_code == 200
     assert 'id="onboard-form"' in resp.text
+
+
+def test_health_alias_returns_ok() -> None:
+    """GET /health is an alias for GET /admin/health."""
+    client = _client()
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert "version" in body
+    assert "invariants" in body
+
+
+def test_admin_health_returns_ok() -> None:
+    """The canonical /admin/health endpoint returns the same payload."""
+    client = _client()
+    resp = client.get("/admin/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
