@@ -14,13 +14,17 @@
 <meta property="og:url" content="https://sirhanmacx.github.io/Claw-STU/">
 <meta property="og:title" content="Claw-STU -- Open Source Personal Learning Agent">
 <meta property="og:description" content="Stuart, a personal learning agent that grows with the student. Adaptive, memory-backed, multi-provider. MIT licensed.">
-<meta property="og:image" content="https://sirhanmacx.github.io/Claw-STU/og-image.png">
+<meta property="og:image" content="https://sirhanmacx.github.io/Claw-STU/stu-mascot.png">
+<meta property="og:image:width" content="581">
+<meta property="og:image:height" content="651">
+<meta property="og:image:alt" content="Stuart, the Claw-STU mascot — a red apple wearing a graduation cap, holding a diploma, with a crab claw for a hand">
 
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Claw-STU -- Open Source Personal Learning Agent">
 <meta name="twitter:description" content="Stuart, a personal learning agent that grows with the student. MIT licensed.">
-<meta name="twitter:image" content="https://sirhanmacx.github.io/Claw-STU/og-image.png">
+<meta name="twitter:image" content="https://sirhanmacx.github.io/Claw-STU/stu-mascot.png">
+<meta name="twitter:image:alt" content="Stuart, the Claw-STU mascot — a red apple scholar with a graduation cap, diploma, and crab claw">
 
 <!-- Schema.org -->
 <script type="application/ld+json">
@@ -30,6 +34,7 @@
   "name": "Claw-STU",
   "description": "Open source personal learning agent for students. Adaptive teach-assess-adapt loop, per-student memory graph, nightly dream-cycle consolidation, crisis-aware safety gate. Multi-provider (Anthropic, OpenAI, Ollama, OpenRouter). Python, MIT licensed.",
   "url": "https://sirhanmacx.github.io/Claw-STU/",
+  "image": "https://sirhanmacx.github.io/Claw-STU/stu-mascot.png",
   "applicationCategory": "EducationalApplication",
   "operatingSystem": "macOS, Windows, Linux",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -147,20 +152,11 @@ header {
 }
 
 header .mascot {
-  width: 120px;
-  height: 120px;
+  width: 160px;
+  height: auto;
   margin: 0 auto 1rem;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--bg-alt), var(--border));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 3rem;
-  font-weight: 700;
-  color: var(--accent);
-  font-family: var(--mono);
-  border: 2px solid var(--border);
-  box-shadow: 0 4px 20px rgba(122, 167, 216, 0.12);
+  display: block;
+  filter: drop-shadow(0 6px 20px rgba(122, 167, 216, 0.15));
 }
 
 header h1 {
@@ -473,7 +469,7 @@ footer a:hover { color: var(--text-bright); }
 
 <!-- ── Header ─────────────────────────────────────── -->
 <header>
-  <div class="mascot">STU</div>
+  <img class="mascot" src="stu-mascot.png" alt="Stuart, the Claw-STU mascot — a red apple wearing a graduation cap, holding a diploma, with a crab claw for a hand">
   <h1>Claw-STU</h1>
   <p class="tagline">Stuart, a personal learning agent that grows with the student. One command, offline-first.</p>
   <nav>
