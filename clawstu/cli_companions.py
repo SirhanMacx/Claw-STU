@@ -338,6 +338,7 @@ def _render_misconceptions(
 # ---------------------------------------------------------------------------
 
 
+# HEARTBEAT: single-responsibility, no natural seam
 def run_history(learner_id: str | None, limit: int) -> None:
     """Implement ``clawstu history [--learner ID] [--limit N]``.
 
@@ -514,98 +515,80 @@ _OFFLINE_WARNING = (
 )
 
 
-def run_ask(question: str, learner_id: str | None) -> None:
-    """Implement ``clawstu ask QUESTION [--learner ID]``.
+def _resolve_learner_for_ask(
+    bundle: StoreBundle, learner_id: str | None,
+) -> _ResolvedLearner | None:
+    """Resolve the learner for ``clawstu ask``, returning None on miss.
 
-    One-shot Socratic question routed through
-    :meth:`ReasoningChain.ask`. No session state is created or
-    modified -- for a full adaptive teach-assess cycle, the student
-    should use ``clawstu learn``.
-
-    If no learner exists the question is answered as an anonymous
-    query -- no memory injection, no brain context. If a learner
-    IS resolved, we inject a short brain slice via
-    :func:`build_learner_context` so the chain can adapt its answer
-    to the student's level and history.
+    Unlike the strict ``_resolve_learner`` used by other companions,
+    this helper never raises -- a question should always return an
+    answer, even if the user has never run ``learn``.
     """
-    import asyncio
-
-    from clawstu.api.main import build_providers
-    from clawstu.memory.context import build_learner_context
-    from clawstu.orchestrator.chain import ReasoningChain
-    from clawstu.orchestrator.config import load_config
-    from clawstu.orchestrator.router import ModelRouter
-    from clawstu.orchestrator.task_kinds import TaskKind
-
-    bundle = default_stores()
-    console = _render_console()
-
-    # Resolve the learner if possible; fall through to anonymous on
-    # failure. We intentionally do NOT raise typer.Exit here -- a
-    # question like ``clawstu ask "what is mitosis"`` should always
-    # return an answer, even if the user has never run ``learn``.
-    resolved: _ResolvedLearner | None = None
     if learner_id is not None:
         profile = bundle.persistence.learners.get(learner_id)
         if profile is not None:
-            resolved = _ResolvedLearner(
-                learner_id=learner_id, profile=profile,
-            )
-    elif any(True for _ in _iter_learner_ids(bundle.persistence)):
+            return _ResolvedLearner(learner_id=learner_id, profile=profile)
+        return None
+
+    if any(True for _ in _iter_learner_ids(bundle.persistence)):
         try:
             resolved_id = most_recent_learner(bundle.persistence)
             profile = bundle.persistence.learners.get(resolved_id)
             if profile is not None:
-                resolved = _ResolvedLearner(
+                return _ResolvedLearner(
                     learner_id=resolved_id, profile=profile,
                 )
         except NoLearnersError:
             pass
+    return None
 
-    # Build the reasoning chain.
-    cfg = load_config()
-    providers = build_providers(cfg)
-    router = ModelRouter(config=cfg, providers=providers)
-    chain = ReasoningChain(router=router)
 
-    # Check for echo/offline mode. The router resolves
-    # SOCRATIC_DIALOGUE at construction time; if it landed on the
-    # EchoProvider, we're in offline demo mode regardless of what
-    # other providers happen to be in the dict.
-    sd_provider, _sd_model = router.for_task(TaskKind.SOCRATIC_DIALOGUE)
-    if type(sd_provider).__name__ == "EchoProvider":
-        console.print(
-            Panel(
-                _OFFLINE_WARNING,
-                border_style="yellow",
-            )
+def _build_ask_prompt(
+    question: str,
+    resolved: _ResolvedLearner | None,
+    bundle: StoreBundle,
+) -> str:
+    """Optionally inject learner context into the question string.
+
+    Returns the original question if no learner is resolved, or a
+    ``<learner_context>``-wrapped version when brain context exists.
+    """
+    if resolved is None:
+        return question
+
+    from clawstu.memory.context import build_learner_context
+
+    context = build_learner_context(
+        learner_id=resolved.learner_id,
+        concept=question[:50],
+        brain_store=bundle.brain_store,
+        kg_store=bundle.persistence.kg,
+        max_chars=2000,
+    )
+    if context.text.strip():
+        return (
+            f"<learner_context>\n{context.text}\n</learner_context>\n\n"
+            f"{question}"
         )
+    return question
 
-    # Optionally inject learner context.
-    effective_question = question
-    if resolved is not None:
-        context = build_learner_context(
-            learner_id=resolved.learner_id,
-            concept=question[:50],
-            brain_store=bundle.brain_store,
-            kg_store=bundle.persistence.kg,
-            max_chars=2000,
-        )
-        if context.text.strip():
-            effective_question = (
-                f"<learner_context>\n{context.text}\n</learner_context>\n\n"
-                f"{question}"
-            )
+
+def _execute_ask(
+    effective_question: str,
+    chain: Any,
+    providers: dict[str, Any],
+) -> str:
+    """Run the chain synchronously and return the answer string.
+
+    Closes provider transports after the call to avoid
+    ``ResourceWarning`` under ``filterwarnings = "error"``.
+    Raises ``ProviderError`` on failure.
+    """
+    import asyncio
+
+    from clawstu.orchestrator.task_kinds import TaskKind
 
     async def _ask_and_cleanup() -> str:
-        """Run the chain and close provider transports when done.
-
-        ``build_providers`` constructs an ``OllamaProvider`` that opens
-        an ``httpx.AsyncClient``. If we let the event loop close with
-        the transport still open, Python emits ``ResourceWarning:
-        unclosed transport``, which fails under ``filterwarnings =
-        "error"``. Explicit cleanup avoids that.
-        """
         try:
             return await chain.ask(
                 effective_question,
@@ -617,16 +600,47 @@ def run_ask(question: str, learner_id: str | None) -> None:
                 if client is not None and hasattr(client, "aclose"):
                     await client.aclose()
 
+    return asyncio.run(_ask_and_cleanup())
+
+
+def run_ask(question: str, learner_id: str | None) -> None:
+    """Implement ``clawstu ask QUESTION [--learner ID]``.
+
+    One-shot Socratic question routed through
+    :meth:`ReasoningChain.ask`. No session state is created or
+    modified -- for a full adaptive teach-assess cycle, the student
+    should use ``clawstu learn``.
+    """
+    from clawstu.api.main import build_providers
+    from clawstu.orchestrator.chain import ReasoningChain
+    from clawstu.orchestrator.config import load_config
     from clawstu.orchestrator.providers import ProviderError
+    from clawstu.orchestrator.router import ModelRouter
+    from clawstu.orchestrator.task_kinds import TaskKind
+
+    bundle = default_stores()
+    console = _render_console()
+    resolved = _resolve_learner_for_ask(bundle, learner_id)
+
+    cfg = load_config()
+    providers = build_providers(cfg)
+    router = ModelRouter(config=cfg, providers=providers)
+    chain = ReasoningChain(router=router)
+
+    sd_provider, _sd_model = router.for_task(TaskKind.SOCRATIC_DIALOGUE)
+    if type(sd_provider).__name__ == "EchoProvider":
+        console.print(Panel(_OFFLINE_WARNING, border_style="yellow"))
+
+    effective_question = _build_ask_prompt(question, resolved, bundle)
 
     try:
-        answer = asyncio.run(_ask_and_cleanup())
+        answer = _execute_ask(effective_question, chain, providers)
     except ProviderError as exc:
         console.print(
             Panel(
                 f"Provider error: {exc}\n\n"
-                "Tip: run `clawstu doctor --ping` to check provider reachability, "
-                "or `clawstu setup` to reconfigure.",
+                "Tip: run `clawstu doctor --ping` to check provider "
+                "reachability, or `clawstu setup` to reconfigure.",
                 title="Stuart",
                 border_style="red",
             )
@@ -665,25 +679,82 @@ def _iter_learner_ids(
 _EXPORT_SCHEMA_VERSION = 1
 
 
+def _collect_export_artifacts(
+    bundle: StoreBundle,
+    resolved: _ResolvedLearner,
+    staging: Any,
+) -> None:
+    """Stage all export files into ``staging`` directory.
+
+    Writes profile.json, sessions.jsonl, events.jsonl, brain/,
+    and meta.json into the staging directory for tarball creation.
+    """
+    import json as _json
+    import shutil
+
+    profile = resolved.profile
+
+    (staging / "profile.json").write_text(
+        profile.model_dump_json(indent=2), encoding="utf-8",
+    )
+
+    sessions = bundle.persistence.sessions.list_for_learner(
+        resolved.learner_id,
+    )
+    with (staging / "sessions.jsonl").open("w", encoding="utf-8") as fh:
+        for session in sessions:
+            fh.write(session.model_dump_json())
+            fh.write("\n")
+
+    events_raw = _iter_events_for_export(
+        bundle.persistence, resolved.learner_id,
+    )
+    with (staging / "events.jsonl").open("w", encoding="utf-8") as fh:
+        for envelope in events_raw:
+            fh.write(_json.dumps(envelope))
+            fh.write("\n")
+
+    from clawstu.memory.store import _learner_hash
+
+    brain_subdir = (
+        bundle.brain_store.base_dir / _learner_hash(resolved.learner_id)
+    )
+    brain_dest = staging / "brain"
+    if brain_subdir.exists():
+        shutil.copytree(brain_subdir, brain_dest)
+    else:
+        brain_dest.mkdir()
+
+    meta = {
+        "schema_version": _EXPORT_SCHEMA_VERSION,
+        "exported_at": datetime.now(UTC).isoformat(),
+        "learner_id": resolved.learner_id,
+        "clawstu_version": __version__,
+    }
+    (staging / "meta.json").write_text(
+        _json.dumps(meta, indent=2), encoding="utf-8",
+    )
+
+
+def _write_export_tarball(staging: Any, out_path: Any) -> None:
+    """Create a ``.tar.gz`` from the staged directory."""
+    import tarfile
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(str(out_path), "w:gz") as tar:
+        for entry in sorted(staging.rglob("*")):
+            arcname = str(entry.relative_to(staging))
+            tar.add(str(entry), arcname=arcname)
+
+
 def run_profile_export(
     learner_id: str, out: str, *, force: bool = False,
 ) -> None:
     """Implement ``clawstu profile export LEARNER_ID --out PATH``.
 
-    Creates a ``.tar.gz`` tarball containing:
-
-    - ``profile.json`` — :meth:`LearnerProfile.model_dump_json` pretty-printed.
-    - ``sessions.jsonl`` — one JSON-per-line of each :class:`Session`.
-    - ``events.jsonl`` — one JSON-per-line of each :class:`ObservationEvent`
-      (with the learner_id + session_id envelope).
-    - ``brain/`` — a recursive copy of the learner's brain directory.
-    - ``meta.json`` — schema_version, exported_at, learner_id, clawstu_version.
-
-    Refuses to overwrite an existing file unless ``--force`` is given.
+    Creates a ``.tar.gz`` tarball containing profile, sessions,
+    events, brain pages, and export metadata.
     """
-    import json as _json
-    import shutil
-    import tarfile
     import tempfile
     from pathlib import Path as _Path
 
@@ -698,70 +769,14 @@ def run_profile_export(
 
     bundle = default_stores()
     resolved = _resolve_learner(bundle.persistence, learner_id)
-    profile = resolved.profile
 
-    # Stage everything in a temp directory, then tar it.
     with tempfile.TemporaryDirectory() as td:
         staging = _Path(td)
-
-        # profile.json
-        (staging / "profile.json").write_text(
-            profile.model_dump_json(indent=2),
-            encoding="utf-8",
-        )
-
-        # sessions.jsonl
-        sessions = bundle.persistence.sessions.list_for_learner(
-            resolved.learner_id,
-        )
-        with (staging / "sessions.jsonl").open("w", encoding="utf-8") as fh:
-            for session in sessions:
-                fh.write(session.model_dump_json())
-                fh.write("\n")
-
-        # events.jsonl
-        events_raw = _iter_events_for_export(
-            bundle.persistence, resolved.learner_id,
-        )
-        with (staging / "events.jsonl").open("w", encoding="utf-8") as fh:
-            for envelope in events_raw:
-                fh.write(_json.dumps(envelope))
-                fh.write("\n")
-
-        # brain/ — copy the learner's brain directory if it exists.
-        from clawstu.memory.store import _learner_hash
-
-        brain_subdir = (
-            bundle.brain_store.base_dir / _learner_hash(resolved.learner_id)
-        )
-        brain_dest = staging / "brain"
-        if brain_subdir.exists():
-            shutil.copytree(brain_subdir, brain_dest)
-        else:
-            brain_dest.mkdir()
-
-        # meta.json
-        meta = {
-            "schema_version": _EXPORT_SCHEMA_VERSION,
-            "exported_at": datetime.now(UTC).isoformat(),
-            "learner_id": resolved.learner_id,
-            "clawstu_version": __version__,
-        }
-        (staging / "meta.json").write_text(
-            _json.dumps(meta, indent=2), encoding="utf-8",
-        )
-
-        # Create the tarball.
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(str(out_path), "w:gz") as tar:
-            for entry in sorted(staging.rglob("*")):
-                arcname = str(entry.relative_to(staging))
-                tar.add(str(entry), arcname=arcname)
+        _collect_export_artifacts(bundle, resolved, staging)
+        _write_export_tarball(staging, out_path)
 
     size = out_path.stat().st_size
-    typer.echo(
-        f"\u2713 Exported to {out_path} ({size} bytes)"
-    )
+    typer.echo(f"\u2713 Exported to {out_path} ({size} bytes)")
 
 
 def run_profile_import(

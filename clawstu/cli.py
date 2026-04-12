@@ -85,6 +85,7 @@ def main_callback(
         )
 
 
+# HEARTBEAT: single-responsibility, no natural seam
 @app.command()
 def learn(
     topic: str | None = typer.Argument(
@@ -277,6 +278,7 @@ def resume(
         raise typer.Exit(code=1) from exc
 
 
+# HEARTBEAT: single-responsibility, no natural seam
 @app.command()
 def setup(
     interactive: bool = typer.Option(

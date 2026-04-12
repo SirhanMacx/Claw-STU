@@ -57,6 +57,7 @@ def _cleanup_rate_store(window: int) -> None:
 class _RateLimiter:
     """Simple in-memory rate limiter.  No external dependencies."""
 
+    # HEARTBEAT: single-responsibility, no natural seam
     def limit(self, rate_string: str) -> Callable[..., Any]:
         """Decorator: enforce a rate limit like ``'30/minute'``."""
         count_str, _, period = rate_string.partition("/")

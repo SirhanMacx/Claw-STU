@@ -31,24 +31,15 @@ class HealthResponse(BaseModel):
     details: dict[str, str] | None = None
 
 
-@router.get("/health", response_model=HealthResponse)
-def health(
-    request: Request,
-    state: AppState = Depends(get_state),
-) -> HealthResponse:
-    """Health check endpoint. Stays public for load balancers.
-
-    Performs real checks:
-    1. Config loads successfully
-    2. Persistence store is accessible
-    3. Scheduler is running (if attached)
-    """
+def _collect_health_invariants(
+    request: Request, state: AppState,
+) -> tuple[dict[str, bool], dict[str, str]]:
+    """Run health checks and return ``(invariants, details)``."""
     from clawstu.orchestrator.config import load_config
 
     invariants: dict[str, bool] = {}
     details: dict[str, str] = {}
 
-    # Check 1: config loads
     try:
         load_config()
         invariants["config_loads"] = True
@@ -57,9 +48,7 @@ def health(
         details["config_error"] = str(exc)
         logger.warning("Health check: config load failed: %s", exc)
 
-    # Check 2: persistence store accessible
     try:
-        # Simple read to verify persistence is working.
         state.persistence.learners.get("__health_check_probe__")
         invariants["persistence_accessible"] = True
     except Exception as exc:
@@ -67,7 +56,6 @@ def health(
         details["persistence_error"] = str(exc)
         logger.warning("Health check: persistence read failed: %s", exc)
 
-    # Check 3: scheduler status
     runner = getattr(request.app.state, "scheduler", None)
     if isinstance(runner, SchedulerRunner):
         invariants["scheduler_running"] = True
@@ -75,20 +63,24 @@ def health(
         invariants["scheduler_running"] = False
         details["scheduler"] = "not initialized"
 
-    # Static invariants
     invariants["safety_filters_active"] = True
+    return invariants, details
 
+
+@router.get("/health", response_model=HealthResponse)
+def health(
+    request: Request,
+    state: AppState = Depends(get_state),
+) -> HealthResponse:
+    """Health check endpoint. Stays public for load balancers."""
+    invariants, _details = _collect_health_invariants(request, state)
     degraded = any(value is False for value in invariants.values())
-
-    # Public health endpoint: return pass/fail invariants but strip
-    # detailed error messages (those go to /admin/scheduler which is
-    # behind auth).  Operators can still see details in server logs.
     return HealthResponse(
         status="degraded" if degraded else "ok",
         version=__version__,
         invariants=invariants,
         active_sessions=len(state.sessions),
-        details=None,  # verbose diagnostics stay in logs only
+        details=None,
     )
 
 

@@ -260,78 +260,82 @@ def load_persistence_from_disk(path: Path) -> InMemoryPersistentStore:
     return store
 
 
-def save_persistence_to_disk(
-    store: InMemoryPersistentStore, path: Path,
-) -> None:
-    """Atomically snapshot a store to ``path``.
-
-    Called at the end of any CLI command that mutates state (``learn``,
-    ``resume``, ``profile import``). Read-only commands (``wiki``,
-    ``progress``, ``history``, ``review``, ``ask``, ``profile export``)
-    should NOT call this -- their view of the world is a strict subset
-    of what's already on disk and rewriting would be pure churn.
-
-    The write is a temp-file + rename so a process kill mid-write
-    cannot leave a partial snapshot. All in-memory substores are
-    walked explicitly rather than introspected via ``vars()`` so the
-    format stays stable even when the ``InMemoryPersistentStore``
-    grows new private fields.
-    """
-    payload: dict[str, object] = {"schema_version": _SCHEMA_VERSION}
-
+def _serialize_core_entities(
+    store: InMemoryPersistentStore,
+) -> tuple[list[str], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    """Serialize learners, sessions, and events. Returns (learner_ids, learners, sessions, events)."""
     learner_ids: list[str] = []
     learners_out: list[dict[str, object]] = []
     for learner_id, profile in _iter_learners(store):
         learner_ids.append(learner_id)
         learners_out.append(profile.model_dump(mode="json"))
-    payload["learners"] = learners_out
 
-    sessions_out: list[dict[str, object]] = []
-    for session in _iter_sessions(store):
-        sessions_out.append(session.model_dump(mode="json"))
-    payload["sessions"] = sessions_out
+    sessions_out = [s.model_dump(mode="json") for s in _iter_sessions(store)]
 
     events_out: list[dict[str, object]] = []
     for learner_id, session_id, event in _iter_events(store):
-        events_out.append(
-            {
-                "learner_id": learner_id,
-                "session_id": session_id,
-                "event": event.model_dump(mode="json"),
-            }
-        )
-    payload["events"] = events_out
+        events_out.append({
+            "learner_id": learner_id,
+            "session_id": session_id,
+            "event": event.model_dump(mode="json"),
+        })
+    return learner_ids, learners_out, sessions_out, events_out
 
+
+def _serialize_per_learner_stores(
+    store: InMemoryPersistentStore,
+    learner_ids: list[str],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Serialize ZPD, modality outcomes, and misconceptions per learner."""
     zpd_out: dict[str, dict[str, dict[str, object]]] = {}
     modality_out: dict[str, dict[str, dict[str, object]]] = {}
     misc_out: dict[str, dict[str, int]] = {}
     for learner_id in learner_ids:
-        per_domain: dict[str, dict[str, object]] = {}
-        for domain, estimate in store.zpd.get_all(learner_id).items():
-            per_domain[domain.value] = estimate.model_dump(mode="json")
+        per_domain = {
+            d.value: e.model_dump(mode="json")
+            for d, e in store.zpd.get_all(learner_id).items()
+        }
         if per_domain:
             zpd_out[learner_id] = per_domain
 
-        per_modality: dict[str, dict[str, object]] = {}
-        for modality, outcome in store.modality_outcomes.get_all(
-            learner_id,
-        ).items():
-            per_modality[modality.value] = outcome.model_dump(mode="json")
+        per_modality = {
+            m.value: o.model_dump(mode="json")
+            for m, o in store.modality_outcomes.get_all(learner_id).items()
+        }
         if per_modality:
             modality_out[learner_id] = per_modality
 
         tallies = store.misconceptions.get_all(learner_id)
         if tallies:
             misc_out[learner_id] = dict(tallies)
+    return zpd_out, modality_out, misc_out
 
-    payload["zpd"] = zpd_out
-    payload["modality_outcomes"] = modality_out
-    payload["misconceptions"] = misc_out
 
-    kg_out: list[dict[str, object]] = []
-    for triple in _iter_kg_triples(store):
-        kg_out.append(triple)
-    payload["kg"] = kg_out
+def save_persistence_to_disk(
+    store: InMemoryPersistentStore, path: Path,
+) -> None:
+    """Atomically snapshot a store to ``path``.
+
+    Temp-file + rename so a process kill mid-write cannot leave
+    a partial snapshot.
+    """
+    learner_ids, learners_out, sessions_out, events_out = (
+        _serialize_core_entities(store)
+    )
+    zpd_out, modality_out, misc_out = (
+        _serialize_per_learner_stores(store, learner_ids)
+    )
+
+    payload: dict[str, object] = {
+        "schema_version": _SCHEMA_VERSION,
+        "learners": learners_out,
+        "sessions": sessions_out,
+        "events": events_out,
+        "zpd": zpd_out,
+        "modality_outcomes": modality_out,
+        "misconceptions": misc_out,
+        "kg": list(_iter_kg_triples(store)),
+    }
 
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")

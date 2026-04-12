@@ -64,6 +64,33 @@ def _resolve_learner_id(
 # -- Tool definitions --------------------------------------------------------
 
 
+def _build_ask_context(
+    question: str, resolved_id: str | None, bundle: Any,
+) -> str:
+    """Inject learner context into question if a learner is resolved."""
+    if not resolved_id:
+        return question
+    profile = bundle.persistence.learners.get(resolved_id)
+    if profile is None:
+        return question
+
+    from clawstu.memory.context import build_learner_context
+
+    context = build_learner_context(
+        learner_id=resolved_id,
+        concept=question[:50],
+        brain_store=bundle.brain_store,
+        kg_store=bundle.persistence.kg,
+        max_chars=2000,
+    )
+    if context.text.strip():
+        return (
+            f"<learner_context>\n{context.text}\n"
+            f"</learner_context>\n\n{question}"
+        )
+    return question
+
+
 @mcp.tool()
 async def clawstu_ask(
     question: str,
@@ -73,15 +100,13 @@ async def clawstu_ask(
 
     Routes through the reasoning chain with TaskKind.SOCRATIC_DIALOGUE.
     If a learner_id is provided (or a recent learner exists), the answer
-    is personalized with their learning context. No session state is
-    created or modified.
+    is personalized with their learning context.
 
     Args:
         question: The question to ask (e.g., "What is photosynthesis?")
         learner_id: Optional learner ID for personalized answers
     """
     from clawstu.api.main import build_providers
-    from clawstu.memory.context import build_learner_context
     from clawstu.orchestrator.chain import ReasoningChain
     from clawstu.orchestrator.config import load_config
     from clawstu.orchestrator.router import ModelRouter
@@ -97,22 +122,7 @@ async def clawstu_ask(
     router = ModelRouter(config=cfg, providers=providers)
     chain = ReasoningChain(router=router)
 
-    effective_question = question
-    if resolved_id:
-        profile = bundle.persistence.learners.get(resolved_id)
-        if profile is not None:
-            context = build_learner_context(
-                learner_id=resolved_id,
-                concept=question[:50],
-                brain_store=bundle.brain_store,
-                kg_store=bundle.persistence.kg,
-                max_chars=2000,
-            )
-            if context.text.strip():
-                effective_question = (
-                    f"<learner_context>\n{context.text}\n"
-                    f"</learner_context>\n\n{question}"
-                )
+    effective_question = _build_ask_context(question, resolved_id, bundle)
 
     try:
         answer = await chain.ask(
@@ -173,6 +183,7 @@ async def clawstu_wiki(
     })
 
 
+# HEARTBEAT: single-responsibility, no natural seam
 @mcp.tool()
 async def clawstu_progress(
     learner_id: str = "",
@@ -227,6 +238,7 @@ async def clawstu_progress(
     })
 
 
+# HEARTBEAT: single-responsibility, no natural seam
 @mcp.tool()
 async def clawstu_review(
     learner_id: str = "",
@@ -284,6 +296,7 @@ async def clawstu_review(
     })
 
 
+# HEARTBEAT: single-responsibility, no natural seam
 @mcp.tool()
 async def clawstu_learn_session(
     topic: str,

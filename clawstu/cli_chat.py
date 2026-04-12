@@ -332,64 +332,52 @@ def run_chat_session(
         raise SystemExit(0) from None
 
 
-async def _run_async_session(
-    inputs: ChatInputs,
-    io: ChatIO,
-    state: AppState | None,
-) -> None:
-    """Async chat loop driver.
+async def _onboard_and_setup(
+    inputs: ChatInputs, io: ChatIO, state: AppState | None,
+) -> tuple[_ChatContext, LearnerProfile, Any]:
+    """Collect inputs, build context, onboard the learner, emit setup info.
 
-    Split out from :func:`run_chat_session` so the synchronous entry
-    point only has to own the ``asyncio.run`` + ``KeyboardInterrupt``
-    wrapping.
+    Returns ``(ctx, profile, session)`` ready for the teach loop.
     """
-    io.say(OPENING_BANNER, panel_title="Stuart", border_style="blue")
-
     learner_id = _resolve_learner_id(inputs, io)
     age = _resolve_age(inputs, io)
     topic_text = _resolve_topic(inputs, io)
     domain = inputs.domain or Domain.OTHER
 
     ctx = _build_chat_context(state)
-
     if not _real_providers(ctx.providers):
         io.say(_OFFLINE_WARNING, border_style="yellow")
-
     io.say("> Setting up your session...")
 
     profile, session = await ctx.runner.onboard_with_topic(
-        learner_id=learner_id,
-        age=age,
-        domain=domain,
-        topic=topic_text,
+        learner_id=learner_id, age=age, domain=domain, topic=topic_text,
     )
     bundle = SessionBundle(profile=profile, session=session)
     ctx.state.put(bundle)
 
     provider_label = _format_provider_label(ctx.router)
     io.say(
-        f"  ✓ Topic: {topic_text}\n"
-        f"  ✓ Age bracket: {profile.age_bracket.value}\n"
-        f"  ✓ Domain: {domain.value}\n"
-        f"  ✓ Provider: {provider_label}"
+        f"  \u2713 Topic: {topic_text}\n"
+        f"  \u2713 Age bracket: {profile.age_bracket.value}\n"
+        f"  \u2713 Domain: {domain.value}\n"
+        f"  \u2713 Provider: {provider_label}"
     )
+    return ctx, profile, session
 
-    # Calibration only runs when the runner left us in CALIBRATING.
-    # The live-topic path (`onboard_with_topic`) skips calibration and
-    # lands directly in TEACHING, so the chat loop mirrors that
-    # behavior rather than forcing a calibration cycle the runner
-    # never asked for. When a future phase wires LLM-backed
-    # calibration for arbitrary topics, flipping the returned phase
-    # to CALIBRATING in the runner will automatically re-enable this
-    # branch without any change to the chat loop.
+
+async def _run_async_session(
+    inputs: ChatInputs,
+    io: ChatIO,
+    state: AppState | None,
+) -> None:
+    """Async chat loop driver."""
+    io.say(OPENING_BANNER, panel_title="Stuart", border_style="blue")
+    ctx, profile, session = await _onboard_and_setup(inputs, io, state)
+
     if session.phase is SessionPhase.CALIBRATING:
         _run_calibration_loop(io, ctx, profile, session)
 
     _run_teach_loop(io, ctx, profile, session)
-
-    # Close + summary. Runner returns a summary string but the
-    # presentation layer builds its own human-facing closing screen
-    # from the profile / session state.
     ctx.runner.close(profile, session)
     ctx.state.drop(session.id)
     _render_session_summary(io, profile, session)

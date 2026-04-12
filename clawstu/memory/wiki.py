@@ -32,55 +32,57 @@ from clawstu.memory.pages import (
 from clawstu.memory.store import BrainStore
 
 
-def generate_concept_wiki(
+def _gather_kg_objects(
+    kg_store: KGStoreProto, concept: str, predicate: str,
+) -> list[str]:
+    """Collect object strings from KG triples matching ``(concept, predicate, *)``."""
+    result: list[str] = []
+    for row in kg_store.find_by_subject(concept):
+        if row.get("predicate") == predicate:
+            obj = row.get("object")
+            if isinstance(obj, str):
+                result.append(obj)
+    return result
+
+
+def _wiki_knowledge_section(
     learner_id: str,
     concept: str,
-    brain_store: BrainStore,
-    kg_store: KGStoreProto,
-) -> str:
-    """Return a markdown concept wiki for ``(learner_id, concept)``."""
-    lines: list[str] = [f"# Concept: {concept}", ""]
-
-    # 1. Stuart's and the student's knowledge (same ConceptPage).
-    concept_page = brain_store.get(PageKind.CONCEPT, concept, learner_id)
-    lines.append(f"## What Stuart knows about {concept}")
-    lines.append("")
+    concept_page: ConceptPage | None,
+) -> list[str]:
+    """Render the 'What Stuart knows' and 'What learner knows' sections."""
+    lines: list[str] = [f"## What Stuart knows about {concept}", ""]
     if isinstance(concept_page, ConceptPage):
         lines.append(concept_page.compiled_truth or "_(no compiled truth yet)_")
     else:
         lines.append(
-            "_(no concept page for this student yet — will be created "
+            "_(no concept page for this student yet -- will be created "
             "on first teach)_"
         )
     lines.append("")
-
     lines.append(f"## What {learner_id} knows")
     lines.append("")
     if isinstance(concept_page, ConceptPage) and concept_page.timeline:
-        lines.append(
-            f"Observed in {len(concept_page.timeline)} session(s)."
-        )
+        lines.append(f"Observed in {len(concept_page.timeline)} session(s).")
     else:
         lines.append("_(no observed interactions yet)_")
     lines.append("")
+    return lines
 
-    # 2. Recent sessions referencing this concept via the KG.
-    session_ids: list[str] = []
-    for row in kg_store.find_by_subject(concept):
-        if row.get("predicate") == "taught_in":
-            obj = row.get("object")
-            if isinstance(obj, str):
-                session_ids.append(obj)
-    lines.append("## Recent sessions")
-    lines.append("")
+
+def _wiki_sessions_section(
+    session_ids: list[str], brain_store: BrainStore, learner_id: str,
+) -> list[str]:
+    """Render the 'Recent sessions' section."""
+    lines: list[str] = ["## Recent sessions", ""]
     if session_ids:
         for sess_id in session_ids:
             session_page = brain_store.get(
-                PageKind.SESSION, sess_id, learner_id
+                PageKind.SESSION, sess_id, learner_id,
             )
             if isinstance(session_page, SessionPage):
                 lines.append(
-                    f"- Session `{sess_id}` — "
+                    f"- Session `{sess_id}` -- "
                     f"{session_page.compiled_truth[:120]}"
                 )
             else:
@@ -88,17 +90,19 @@ def generate_concept_wiki(
     else:
         lines.append("_(none)_")
     lines.append("")
+    return lines
 
-    # 3. Misconceptions tied to the concept.
+
+def _wiki_misconceptions_section(
+    brain_store: BrainStore, learner_id: str, concept: str,
+) -> list[str]:
+    """Render the 'Open misconceptions' section."""
     misconceptions = [
         p
-        for p in brain_store.list_for_learner(
-            learner_id, PageKind.MISCONCEPTION
-        )
+        for p in brain_store.list_for_learner(learner_id, PageKind.MISCONCEPTION)
         if isinstance(p, MisconceptionPage) and p.concept_id == concept
     ]
-    lines.append("## Open misconceptions")
-    lines.append("")
+    lines: list[str] = ["## Open misconceptions", ""]
     if misconceptions:
         for misc in misconceptions:
             lines.append(
@@ -109,21 +113,17 @@ def generate_concept_wiki(
     else:
         lines.append("_(none observed)_")
     lines.append("")
+    return lines
 
-    # 4. Tied primary sources.
-    source_ids: list[str] = []
-    for row in kg_store.find_by_subject(concept):
-        if row.get("predicate") == "has_source":
-            obj = row.get("object")
-            if isinstance(obj, str):
-                source_ids.append(obj)
-    lines.append("## Tied primary sources")
-    lines.append("")
+
+def _wiki_sources_section(
+    source_ids: list[str], brain_store: BrainStore, learner_id: str,
+) -> list[str]:
+    """Render the 'Tied primary sources' section."""
+    lines: list[str] = ["## Tied primary sources", ""]
     if source_ids:
         for src_id in source_ids:
-            source_page = brain_store.get(
-                PageKind.SOURCE, src_id, learner_id
-            )
+            source_page = brain_store.get(PageKind.SOURCE, src_id, learner_id)
             if isinstance(source_page, SourcePage):
                 lines.append(
                     f"- **{source_page.title}** "
@@ -134,5 +134,27 @@ def generate_concept_wiki(
     else:
         lines.append("_(none tagged)_")
     lines.append("")
+    return lines
+
+
+def generate_concept_wiki(
+    learner_id: str,
+    concept: str,
+    brain_store: BrainStore,
+    kg_store: KGStoreProto,
+) -> str:
+    """Return a markdown concept wiki for ``(learner_id, concept)``."""
+    concept_page = brain_store.get(PageKind.CONCEPT, concept, learner_id)
+    typed_page = concept_page if isinstance(concept_page, ConceptPage) else None
+
+    lines: list[str] = [f"# Concept: {concept}", ""]
+    lines.extend(_wiki_knowledge_section(learner_id, concept, typed_page))
+
+    session_ids = _gather_kg_objects(kg_store, concept, "taught_in")
+    lines.extend(_wiki_sessions_section(session_ids, brain_store, learner_id))
+    lines.extend(_wiki_misconceptions_section(brain_store, learner_id, concept))
+
+    source_ids = _gather_kg_objects(kg_store, concept, "has_source")
+    lines.extend(_wiki_sources_section(source_ids, brain_store, learner_id))
 
     return "\n".join(lines)

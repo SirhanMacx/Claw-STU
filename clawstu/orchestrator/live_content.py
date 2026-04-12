@@ -310,58 +310,21 @@ class LiveContentGenerator:
                 model=model,
             )
 
-        prompt_text = _require_str(payload, "prompt")
-        type_value = _require_str(payload, "type")
-
-        strings_to_check = [prompt_text]
-        rubric: tuple[str, ...] | None = None
-        choices: tuple[str, ...] | None = None
-        canonical: str | None = None
-        assessment_type: AssessmentType
-
-        if type_value in ("crq", "source_analysis"):
-            assessment_type = (
-                AssessmentType.CRQ
-                if type_value == "crq"
-                else AssessmentType.SOURCE_ANALYSIS
-            )
-            raw_rubric = payload.get("rubric")
-            if not isinstance(raw_rubric, list) or not raw_rubric:
-                raise LiveGenerationError(
-                    f"check response missing 'rubric': {payload!r}"
-                )
-            rubric = tuple(str(r) for r in raw_rubric)
-            strings_to_check.extend(rubric)
-        elif type_value == "multiple_choice":
-            assessment_type = AssessmentType.MULTIPLE_CHOICE
-            raw_choices = payload.get("choices")
-            if not isinstance(raw_choices, list) or len(raw_choices) < 2:
-                raise LiveGenerationError(
-                    f"check response missing 'choices': {payload!r}"
-                )
-            choices = tuple(str(c) for c in raw_choices)
-            canonical = _require_str(payload, "canonical_answer")
-            strings_to_check.extend(choices)
-            strings_to_check.append(canonical)
-        else:
-            raise LiveGenerationError(
-                f"check response has unknown type: {type_value!r}"
-            )
-
+        parsed = _parse_check_payload(payload)
         self._safety.check_strings(
-            strings=strings_to_check, age_bracket=age_bracket
+            strings=parsed["strings_to_check"], age_bracket=age_bracket,
         )
         return AssessmentItem(
             id=str(uuid.uuid4()),
             domain=topic.domain,
             tier=tier,
             modality=modality,
-            type=assessment_type,
-            prompt=prompt_text,
+            type=parsed["assessment_type"],
+            prompt=parsed["prompt_text"],
             concept=concept,
-            choices=choices,
-            canonical_answer=canonical,
-            rubric=rubric,
+            choices=parsed["choices"],
+            canonical_answer=parsed["canonical"],
+            rubric=parsed["rubric"],
         )
 
     # -- internals --------------------------------------------------------
@@ -403,6 +366,57 @@ class LiveContentGenerator:
                 f"provider JSON must be an object, got: {type(parsed).__name__}"
             )
         return parsed
+
+
+def _parse_check_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Parse and validate a check-generation JSON payload.
+
+    Returns a dict with keys: prompt_text, assessment_type, rubric,
+    choices, canonical, strings_to_check.
+    """
+    prompt_text = _require_str(payload, "prompt")
+    type_value = _require_str(payload, "type")
+    strings_to_check = [prompt_text]
+    rubric: tuple[str, ...] | None = None
+    choices: tuple[str, ...] | None = None
+    canonical: str | None = None
+
+    if type_value in ("crq", "source_analysis"):
+        assessment_type = (
+            AssessmentType.CRQ if type_value == "crq"
+            else AssessmentType.SOURCE_ANALYSIS
+        )
+        raw_rubric = payload.get("rubric")
+        if not isinstance(raw_rubric, list) or not raw_rubric:
+            raise LiveGenerationError(
+                f"check response missing 'rubric': {payload!r}"
+            )
+        rubric = tuple(str(r) for r in raw_rubric)
+        strings_to_check.extend(rubric)
+    elif type_value == "multiple_choice":
+        assessment_type = AssessmentType.MULTIPLE_CHOICE
+        raw_choices = payload.get("choices")
+        if not isinstance(raw_choices, list) or len(raw_choices) < 2:
+            raise LiveGenerationError(
+                f"check response missing 'choices': {payload!r}"
+            )
+        choices = tuple(str(c) for c in raw_choices)
+        canonical = _require_str(payload, "canonical_answer")
+        strings_to_check.extend(choices)
+        strings_to_check.append(canonical)
+    else:
+        raise LiveGenerationError(
+            f"check response has unknown type: {type_value!r}"
+        )
+
+    return {
+        "prompt_text": prompt_text,
+        "assessment_type": assessment_type,
+        "rubric": rubric,
+        "choices": choices,
+        "canonical": canonical,
+        "strings_to_check": strings_to_check,
+    }
 
 
 def _require_str(payload: dict[str, Any], key: str) -> str:

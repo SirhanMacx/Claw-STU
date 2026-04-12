@@ -156,6 +156,64 @@ def _halt_for_boundary(decision: InboundDecision) -> HTTPException:
     return HTTPException(status_code=400, detail=restate)
 
 
+async def _onboard_with_topic_or_fallback(
+    state: AppState,
+    request: OnboardRequest,
+) -> tuple[LearnerProfile, Session, bool, str | None]:
+    """Attempt live-content onboard; degrade to seed-library on failure.
+
+    Returns ``(profile, session, degraded, degraded_reason)``.
+    """
+    import httpx
+
+    from clawstu.api.main import build_providers
+    from clawstu.orchestrator.live_content import LiveGenerationError
+    from clawstu.orchestrator.providers import ProviderError
+
+    cfg = load_config()
+    providers = build_providers(cfg)
+    rt = ModelRouter(config=cfg, providers=providers)
+    live = LiveContentGenerator(router=rt)
+
+    try:
+        profile, session = await state.runner.onboard_with_topic(
+            learner_id=request.learner_id,
+            age=request.age,
+            domain=request.domain,
+            topic=request.topic,
+            live_content_override=live,
+        )
+        return profile, session, False, None
+    except (
+        ConnectionError, TimeoutError, httpx.HTTPError,
+        ValueError, OSError, ProviderError, LiveGenerationError,
+    ):
+        pass
+
+    reason = "provider unreachable, using seed library"
+    try:
+        profile, session = state.runner.onboard(
+            learner_id=request.learner_id,
+            age=request.age,
+            domain=request.domain,
+            topic=request.topic,
+        )
+    except ValueError:
+        profile, session = state.runner.onboard(
+            learner_id=request.learner_id,
+            age=request.age,
+            domain=Domain.US_HISTORY,
+            topic=request.topic,
+        )
+        if request.domain != Domain.US_HISTORY:
+            reason = (
+                f"provider unreachable, using seed library; "
+                f"domain changed from {request.domain.value} "
+                f"to us_history (only seed domain available)"
+            )
+    return profile, session, True, reason
+
+
 @router.post("", response_model=OnboardResponse, status_code=201)
 @limiter.limit("10/minute")
 async def onboard(
@@ -164,62 +222,13 @@ async def onboard(
     _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> OnboardResponse:
-    import httpx
-
-    from clawstu.orchestrator.live_content import LiveGenerationError
-    from clawstu.orchestrator.providers import ProviderError
-
-    degraded = False
-    degraded_reason: str | None = None
-    original_domain = request.domain
-
     try:
         if request.topic is not None:
-            # Topic-aware path: use the live-content generator so
-            # arbitrary topics go through the LLM-backed pathway.
-            # If the provider is unreachable, fall back to the sync
-            # path so the session still starts with the topic stored.
-            from clawstu.api.main import build_providers
-
-            cfg = load_config()
-            providers = build_providers(cfg)
-            router = ModelRouter(config=cfg, providers=providers)
-            live = LiveContentGenerator(router=router)
-            try:
-                profile, session = await state.runner.onboard_with_topic(
-                    learner_id=request.learner_id,
-                    age=request.age,
-                    domain=request.domain,
-                    topic=request.topic,
-                    live_content_override=live,
-                )
-            except (ConnectionError, TimeoutError, httpx.HTTPError, ValueError, OSError, ProviderError, LiveGenerationError):
-                # Provider unreachable — fall back to the sync
-                # seed-library path.  Flag as degraded (STU-5).
-                degraded = True
-                degraded_reason = "provider unreachable, using seed library"
-                try:
-                    profile, session = state.runner.onboard(
-                        learner_id=request.learner_id,
-                        age=request.age,
-                        domain=request.domain,
-                        topic=request.topic,
-                    )
-                except ValueError:
-                    profile, session = state.runner.onboard(
-                        learner_id=request.learner_id,
-                        age=request.age,
-                        domain=Domain.US_HISTORY,
-                        topic=request.topic,
-                    )
-                    if original_domain != Domain.US_HISTORY:
-                        degraded_reason = (
-                            f"provider unreachable, using seed library; "
-                            f"domain changed from {original_domain.value} "
-                            f"to us_history (only seed domain available)"
-                        )
+            profile, session, degraded, degraded_reason = (
+                await _onboard_with_topic_or_fallback(state, request)
+            )
         else:
-            # No topic: deterministic seed-library path with calibration.
+            degraded, degraded_reason = False, None
             profile, session = state.runner.onboard(
                 learner_id=request.learner_id,
                 age=request.age,
@@ -367,6 +376,35 @@ async def submit_check_answer(
     return DirectiveResponse(directive=directive, session=bundle.session)
 
 
+async def _socratic_ask_with_fallback(student_input: str) -> str:
+    """Route a Socratic question through the chain with Echo fallback.
+
+    Falls back to EchoProvider if the primary provider is unreachable.
+    """
+    from clawstu.api.main import build_providers
+    from clawstu.orchestrator.chain import ReasoningChain
+    from clawstu.orchestrator.providers import ProviderError
+    from clawstu.orchestrator.task_kinds import TaskKind
+
+    cfg = load_config()
+    providers = build_providers(cfg)
+    rt = ModelRouter(config=cfg, providers=providers)
+    chain = ReasoningChain(router=rt)
+    try:
+        return await chain.ask(
+            student_input, task_kind=TaskKind.SOCRATIC_DIALOGUE,
+        )
+    except ProviderError:
+        from clawstu.orchestrator.providers import EchoProvider, LLMProvider
+
+        echo_providers: dict[str, LLMProvider] = {"echo": EchoProvider()}
+        echo_router = ModelRouter(config=cfg, providers=echo_providers)
+        fallback_chain = ReasoningChain(router=echo_router)
+        return await fallback_chain.ask(
+            student_input, task_kind=TaskKind.SOCRATIC_DIALOGUE,
+        )
+
+
 @router.post("/{session_id}/socratic", response_model=SocraticResponse)
 @limiter.limit("20/minute")
 async def socratic(
@@ -376,18 +414,7 @@ async def socratic(
     _auth: None = Depends(require_auth),
     state: AppState = Depends(get_state),
 ) -> SocraticResponse:
-    """Ad-hoc student question routed through the safety gate and the
-    real Socratic dialogue path via `ReasoningChain.ask()`.
-
-    Safety ordering is preserved:
-    1. crisis first — immediate pause + resources
-    2. boundary second — HTTP 400 with restate
-    3. allow — route through the orchestrator
-    """
-    from clawstu.api.main import build_providers
-    from clawstu.orchestrator.chain import ReasoningChain
-    from clawstu.orchestrator.task_kinds import TaskKind
-
+    """Ad-hoc student question through safety gate + Socratic chain."""
     bundle = _bundle(state, session_id)
     decision = _GATE.scan(request.student_input)
     if decision.action == "crisis":
@@ -401,29 +428,7 @@ async def socratic(
     if decision.action == "boundary":
         raise _halt_for_boundary(decision)
 
-    # Route through the real orchestrator-backed Socratic path.
-    # If the primary provider is unreachable (e.g. Ollama not running),
-    # fall back to Echo so the endpoint never returns an error for a
-    # benign, non-crisis, non-boundary student question.
-    from clawstu.orchestrator.providers import ProviderError
-
-    cfg = load_config()
-    providers = build_providers(cfg)
-    router = ModelRouter(config=cfg, providers=providers)
-    chain = ReasoningChain(router=router)
-    try:
-        response_text = await chain.ask(
-            request.student_input, task_kind=TaskKind.SOCRATIC_DIALOGUE,
-        )
-    except ProviderError:
-        from clawstu.orchestrator.providers import EchoProvider, LLMProvider
-
-        echo_providers: dict[str, LLMProvider] = {"echo": EchoProvider()}
-        echo_router = ModelRouter(config=cfg, providers=echo_providers)
-        fallback_chain = ReasoningChain(router=echo_router)
-        response_text = await fallback_chain.ask(
-            request.student_input, task_kind=TaskKind.SOCRATIC_DIALOGUE,
-        )
+    response_text = await _socratic_ask_with_fallback(request.student_input)
     return SocraticResponse(
         response=response_text,
         phase=bundle.session.phase,

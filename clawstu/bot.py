@@ -88,6 +88,27 @@ async def _handle_help(update: Any, context: Any) -> None:
     await update.message.reply_text(_HELP_TEXT)
 
 
+async def _bot_create_session(
+    topic: str, name: str,
+) -> _BotSession:
+    """Onboard a learner and build a ``_BotSession`` for the Telegram bot."""
+    _cfg, _router, live = _build_bot_context()
+    runner = SessionRunner(live_content=live)
+    state = AppState(cache_size=4, runner=runner)
+    evaluator = Evaluator()
+
+    profile, session = await runner.onboard_with_topic(
+        learner_id=name, age=15, domain=Domain.OTHER, topic=topic,
+    )
+    bundle = SessionBundle(profile=profile, session=session)
+    state.put(bundle)
+
+    return _BotSession(
+        profile=profile, session=session,
+        runner=runner, evaluator=evaluator, state=state,
+    )
+
+
 async def _handle_learn(update: Any, context: Any) -> None:
     """Handle /learn <topic> -- create a session and send the first block."""
     chat_id: int = update.effective_chat.id
@@ -97,50 +118,27 @@ async def _handle_learn(update: Any, context: Any) -> None:
         return
 
     topic = " ".join(args)
-
     if chat_id in _sessions:
         await update.message.reply_text(
             "You already have an active session. Send /quit first."
         )
         return
 
-    _cfg, _router, live = _build_bot_context()
-    runner = SessionRunner(live_content=live)
-    state = AppState(cache_size=4, runner=runner)
-    evaluator = Evaluator()
-
     name = (
         update.effective_user.first_name
-        if update.effective_user
-        else "Learner"
+        if update.effective_user else "Learner"
     )
-
     await update.message.reply_text(f"Setting up a session on: {topic}...")
-
-    profile, session = await runner.onboard_with_topic(
-        learner_id=name,
-        age=15,
-        domain=Domain.OTHER,
-        topic=topic,
-    )
-    bundle = SessionBundle(profile=profile, session=session)
-    state.put(bundle)
-
-    bot_session = _BotSession(
-        profile=profile,
-        session=session,
-        runner=runner,
-        evaluator=evaluator,
-        state=state,
-    )
+    bot_session = await _bot_create_session(topic, name)
     _sessions[chat_id] = bot_session
 
-    directive = runner.next_directive(profile, session)
+    directive = bot_session.runner.next_directive(
+        bot_session.profile, bot_session.session,
+    )
     if directive.block is not None:
         block = directive.block
-        text = f"*{block.title}*\n\n{block.body}"
         await update.message.reply_text(
-            text[:4096], parse_mode=None,
+            f"*{block.title}*\n\n{block.body}"[:4096], parse_mode=None,
         )
         await update.message.reply_text(
             "Reply with your answer when you're ready."
@@ -210,6 +208,19 @@ async def _handle_quit(update: Any, context: Any) -> None:
     await update.message.reply_text(f"Session closed.\n\n{summary}")
 
 
+async def _bot_send_directive(update: Any, directive: Any) -> None:
+    """Send the next directive's block or message to the Telegram chat."""
+    if directive.block is not None:
+        block = directive.block
+        text_out = f"*{block.title}*\n\n{block.body}"
+        await update.message.reply_text(text_out[:4096], parse_mode=None)
+        await update.message.reply_text(
+            "Reply with your answer when you're ready."
+        )
+    elif directive.message:
+        await update.message.reply_text(directive.message)
+
+
 async def _handle_message(update: Any, context: Any) -> None:
     """Handle free-text messages as answers to the current session."""
     chat_id: int = update.effective_chat.id
@@ -258,15 +269,7 @@ async def _handle_message(update: Any, context: Any) -> None:
         await update.message.reply_text(f"Session complete.\n\n{summary}")
         return
 
-    if directive.block is not None:
-        block = directive.block
-        text_out = f"*{block.title}*\n\n{block.body}"
-        await update.message.reply_text(text_out[:4096], parse_mode=None)
-        await update.message.reply_text(
-            "Reply with your answer when you're ready."
-        )
-    elif directive.message:
-        await update.message.reply_text(directive.message)
+    await _bot_send_directive(update, directive)
 
 
 def run_bot(*, token: str) -> None:

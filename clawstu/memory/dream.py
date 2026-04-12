@@ -119,6 +119,7 @@ def _is_meaningful_change(old: str, new: str) -> bool:
     return False
 
 
+# HEARTBEAT: single-responsibility, no natural seam
 async def dream_cycle(
     learner_id: str,
     consolidator: Consolidator,

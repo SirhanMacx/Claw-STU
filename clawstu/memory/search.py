@@ -136,55 +136,39 @@ def _rank_by_score(
     return {key: idx + 1 for idx, (key, _) in enumerate(ordered)}
 
 
-def hybrid_search(
-    query: str,
-    brain_store: BrainStore,
-    learner_id: str,
+def _compute_vector_ranks(
     embeddings: Embeddings,
-    top_k: int = 10,
-) -> list[SearchResult]:
-    """Hybrid keyword + vector retrieval with RRF fusion.
+    query: str,
+    keyed_pages: dict[str, BrainPage],
+) -> dict[str, int] | None:
+    """Compute vector-based ranks if embeddings produce a useful signal.
 
-    Returns the top ``top_k`` pages tied to ``learner_id``, ranked
-    by Reciprocal Rank Fusion of a keyword-match leg and an
-    embeddings-based vector leg. If ``embeddings.is_ready()`` is
-    False, the vector leg is skipped and the result is keyword-only.
+    Returns None when the backend is not ready or all scores are
+    uniform (NullEmbeddings zero-vector case).
     """
-    pages = brain_store.list_for_learner(learner_id)
-    if not pages:
-        return []
-
-    query_terms = set(_tokenize(query))
-    keyed_pages: dict[str, BrainPage] = {_page_key(p): p for p in pages}
-
-    # Keyword leg
-    keyword_scores = [
-        (key, _keyword_score(query_terms, page.compiled_truth))
-        for key, page in keyed_pages.items()
+    if not embeddings.is_ready():
+        return None
+    query_vec = embeddings.encode(query)
+    page_texts = [page.compiled_truth for page in keyed_pages.values()]
+    page_vecs = embeddings.encode_batch(page_texts)
+    vector_scores = [
+        (key, _cosine_similarity(query_vec, page_vecs[idx]))
+        for idx, key in enumerate(keyed_pages.keys())
     ]
-    keyword_ranks = _rank_by_score(keyword_scores)
+    unique_scores = {round(score, 9) for _, score in vector_scores}
+    if len(unique_scores) > 1:
+        return _rank_by_score(vector_scores)
+    return None
 
-    # Vector leg (only if backend is ready AND produces any signal)
-    vector_ranks: dict[str, int] | None = None
-    if embeddings.is_ready():
-        query_vec = embeddings.encode(query)
-        page_texts = [page.compiled_truth for page in keyed_pages.values()]
-        page_vecs = embeddings.encode_batch(page_texts)
-        vector_scores = [
-            (key, _cosine_similarity(query_vec, page_vecs[idx]))
-            for idx, key in enumerate(keyed_pages.keys())
-        ]
-        # Degenerate case: the backend is "ready" but every page scores
-        # identically (e.g., NullEmbeddings returns zero vectors, so
-        # every cosine is 0.0). A uniform vector leg contributes only
-        # the alphabetical tiebreaker of `_rank_by_score`, which would
-        # inject noise into the keyword result. Skip it in that case so
-        # the final ordering is driven by the keyword leg alone.
-        unique_scores = {round(score, 9) for _, score in vector_scores}
-        if len(unique_scores) > 1:
-            vector_ranks = _rank_by_score(vector_scores)
 
-    # RRF fusion
+def _reciprocal_rank_fuse(
+    keyed_pages: dict[str, BrainPage],
+    keyword_scores: list[tuple[str, float]],
+    keyword_ranks: dict[str, int],
+    vector_ranks: dict[str, int] | None,
+    top_k: int,
+) -> list[SearchResult]:
+    """Fuse keyword and vector ranks via RRF and return top-k results."""
     keyword_score_map = dict(keyword_scores)
     fused: list[tuple[str, float]] = []
     for key in keyed_pages:
@@ -193,15 +177,35 @@ def hybrid_search(
             rrf += 1.0 / (RRF_K + vector_ranks[key])
         fused.append((key, rrf))
 
-    # Sort by RRF descending, tiebreak by keyword score (so the
-    # degraded keyword-only path is stable across runs).
     fused.sort(key=lambda pair: (-pair[1], -keyword_score_map[pair[0]], pair[0]))
-    top = fused[:top_k]
     return [
-        SearchResult(
-            page_key=key,
-            score=score,
-            page=keyed_pages[key],
-        )
-        for key, score in top
+        SearchResult(page_key=key, score=score, page=keyed_pages[key])
+        for key, score in fused[:top_k]
     ]
+
+
+def hybrid_search(
+    query: str,
+    brain_store: BrainStore,
+    learner_id: str,
+    embeddings: Embeddings,
+    top_k: int = 10,
+) -> list[SearchResult]:
+    """Hybrid keyword + vector retrieval with RRF fusion."""
+    pages = brain_store.list_for_learner(learner_id)
+    if not pages:
+        return []
+
+    query_terms = set(_tokenize(query))
+    keyed_pages: dict[str, BrainPage] = {_page_key(p): p for p in pages}
+
+    keyword_scores = [
+        (key, _keyword_score(query_terms, page.compiled_truth))
+        for key, page in keyed_pages.items()
+    ]
+    keyword_ranks = _rank_by_score(keyword_scores)
+    vector_ranks = _compute_vector_ranks(embeddings, query, keyed_pages)
+
+    return _reciprocal_rank_fuse(
+        keyed_pages, keyword_scores, keyword_ranks, vector_ranks, top_k,
+    )

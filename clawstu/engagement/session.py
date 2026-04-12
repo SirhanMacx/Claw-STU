@@ -527,6 +527,7 @@ class SessionRunner:
         session.last_check_item = chosen
         return chosen
 
+    # HEARTBEAT: single-responsibility, no natural seam
     def record_check(
         self,
         profile: LearnerProfile,

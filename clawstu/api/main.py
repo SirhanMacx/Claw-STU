@@ -80,6 +80,7 @@ class _WsRateLimiter:
         return True
 
 
+# HEARTBEAT: single-responsibility, no natural seam
 def build_providers(cfg: AppConfig) -> dict[str, LLMProvider]:
     """Build the provider dict the router will draw from.
 
