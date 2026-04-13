@@ -25,7 +25,7 @@ class ExportDocxTool(BaseTool):
     }
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> str:
-        from docx import Document  # type: ignore[import-untyped]
+        from docx import Document
 
         source_path = Path(args["source_path"])
         output_path = Path(

@@ -563,7 +563,7 @@ def _run_generate(artifact_type: str, topic: str, learner_id: str | None) -> Non
         raise typer.Exit(code=2)
 
     try:
-        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+        from clawstu.agent.loop import AgentLoop
 
         _ = AgentLoop  # keep linter happy; actual call will come in Phase 2
         typer.echo(f"Generating {artifact_type} on '{topic}' ...")
@@ -613,7 +613,7 @@ def export(
         raise typer.Exit(code=2)
 
     try:
-        from clawstu.agent.tools import export_pdf  # type: ignore[import-not-found]
+        from clawstu.agent.tools import export_pdf
 
         _ = export_pdf
         typer.echo(f"Exporting to {fmt} ...")
@@ -635,7 +635,7 @@ def search(
     snippets.
     """
     try:
-        from clawstu.agent.tools import search_brain  # type: ignore[import-not-found]
+        from clawstu.agent.tools import search_brain
 
         _ = search_brain
         typer.echo(f"Searching for '{query}' ...")
@@ -705,7 +705,7 @@ def ingest(
         raise typer.Exit(code=1)
 
     try:
-        from clawed.ingest import ingest_materials  # type: ignore[import-not-found]
+        from clawed.ingest import ingest_materials
 
         _ = ingest_materials
         typer.echo(f"Ingesting {path} via Claw-ED ingestor ...")

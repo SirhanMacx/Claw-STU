@@ -32,7 +32,7 @@ class ExportPDFTool(BaseTool):
             content = f"<html><body><pre>{content}</pre></body></html>"
 
         try:
-            from weasyprint import HTML  # type: ignore[import-untyped]
+            from weasyprint import HTML
 
             HTML(string=content).write_pdf(str(output_path))
             return f"Exported PDF: {output_path} ({output_path.stat().st_size} bytes)"

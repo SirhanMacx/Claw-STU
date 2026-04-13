@@ -41,7 +41,7 @@ class ExportFlashcardsTool(BaseTool):
 
         if fmt == "anki":
             try:
-                import genanki  # type: ignore[import-untyped]
+                import genanki
 
                 model = genanki.Model(
                     1607392319, "Simple",

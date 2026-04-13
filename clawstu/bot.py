@@ -293,7 +293,7 @@ async def _handle_game(update: Any, context: Any) -> None:
 
     topic = " ".join(args)
     try:
-        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+        from clawstu.agent.loop import AgentLoop
 
         _ = AgentLoop
         await update.message.reply_text(f"Generating game on: {topic}...")
@@ -315,7 +315,7 @@ async def _handle_practice(update: Any, context: Any) -> None:
 
     topic = " ".join(args)
     try:
-        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+        from clawstu.agent.loop import AgentLoop
 
         _ = AgentLoop
         await update.message.reply_text(f"Generating practice on: {topic}...")
@@ -337,7 +337,7 @@ async def _handle_flashcards(update: Any, context: Any) -> None:
 
     topic = " ".join(args)
     try:
-        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+        from clawstu.agent.loop import AgentLoop
 
         _ = AgentLoop
         await update.message.reply_text(f"Generating flashcards on: {topic}...")
@@ -359,7 +359,7 @@ async def _handle_study(update: Any, context: Any) -> None:
 
     topic = " ".join(args)
     try:
-        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+        from clawstu.agent.loop import AgentLoop
 
         _ = AgentLoop
         await update.message.reply_text(f"Generating study guide on: {topic}...")
@@ -381,7 +381,7 @@ async def _handle_export(update: Any, context: Any) -> None:
         return
 
     try:
-        from clawstu.agent.tools import export_pdf  # type: ignore[import-not-found]
+        from clawstu.agent.tools import export_pdf
 
         _ = export_pdf
         await update.message.reply_text("Exporting session artifacts...")

@@ -39,7 +39,7 @@ class SearchTeacherMaterialsTool(BaseTool):
         kb = _kb_path()
 
         try:
-            from clawed.knowledge.curriculum_kb import CurriculumKB  # type: ignore[import-untyped]
+            from clawed.knowledge.curriculum_kb import CurriculumKB
 
             results = CurriculumKB(kb).search(query, limit=limit)
             rows = [{"title": r.title, "preview": r.snippet[:200]} for r in results]

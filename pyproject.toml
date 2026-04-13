@@ -117,6 +117,16 @@ disallow_untyped_defs = true
 module = "apscheduler.*"
 ignore_missing_imports = true
 
+# Optional export dependencies — not installed in CI.
+[[tool.mypy.overrides]]
+module = ["weasyprint", "genanki", "docx"]
+ignore_missing_imports = true
+
+# Claw-ED shared KB bridge — only available when Ed is co-installed.
+[[tool.mypy.overrides]]
+module = "clawed.*"
+ignore_missing_imports = true
+
 [[tool.mypy.overrides]]
 module = "telegram.*"
 ignore_missing_imports = true
