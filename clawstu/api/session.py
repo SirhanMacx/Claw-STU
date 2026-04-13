@@ -176,6 +176,7 @@ async def _onboard_with_topic_or_fallback(
     live = LiveContentGenerator(router=rt)
 
     try:
+        assert request.topic is not None  # caller guarantees topic
         profile, session = await state.runner.onboard_with_topic(
             learner_id=request.learner_id,
             age=request.age,

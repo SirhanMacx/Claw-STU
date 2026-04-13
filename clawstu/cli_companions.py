@@ -590,10 +590,11 @@ def _execute_ask(
 
     async def _ask_and_cleanup() -> str:
         try:
-            return await chain.ask(
+            result: str = await chain.ask(
                 effective_question,
                 task_kind=TaskKind.SOCRATIC_DIALOGUE,
             )
+            return result
         finally:
             for provider in providers.values():
                 client = getattr(provider, "_client", None)
