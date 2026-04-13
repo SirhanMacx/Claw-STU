@@ -15,7 +15,7 @@ class ReadMisconceptionsTool(BaseTool):
         "Retrieve the student's recorded misconceptions from "
         "the brain store and learner profile."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {},
         "required": [],

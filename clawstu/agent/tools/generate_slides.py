@@ -12,7 +12,7 @@ class GenerateSlidesTool(BaseTool):
     description = (
         "Create a 3-5 slide HTML mini deck for visual learners."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {"type": "string", "description": "Topic for the slides"},

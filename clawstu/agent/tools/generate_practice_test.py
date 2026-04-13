@@ -13,7 +13,7 @@ class GeneratePracticeTestTool(BaseTool):
         "Create a practice test calibrated to the student's ZPD "
         "tier, with an optional answer key."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {"type": "string", "description": "Test topic"},

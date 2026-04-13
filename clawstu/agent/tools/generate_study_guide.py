@@ -14,7 +14,7 @@ class GenerateStudyGuideTool(BaseTool):
         "Create a condensed review/study guide based on the "
         "student's session history and brain pages."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {

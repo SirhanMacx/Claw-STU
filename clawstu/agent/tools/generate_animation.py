@@ -13,7 +13,7 @@ class GenerateAnimationTool(BaseTool):
         "Create an animated HTML explanation of a concept. "
         "Uses CSS/JS animations for step-by-step visualization."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {"type": "string", "description": "Topic to animate"},

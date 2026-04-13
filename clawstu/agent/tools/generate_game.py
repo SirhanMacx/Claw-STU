@@ -13,7 +13,7 @@ class GenerateGameTool(BaseTool):
         "Create an interactive HTML learning game. Types: "
         "matching, sorting, timeline, quiz."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {"type": "string", "description": "Topic for the game"},

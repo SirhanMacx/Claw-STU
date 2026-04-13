@@ -14,7 +14,7 @@ class ReadProfileTool(BaseTool):
         "Read the current student's learning profile including "
         "ZPD estimates, modality outcomes, and misconceptions."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {},
         "required": [],

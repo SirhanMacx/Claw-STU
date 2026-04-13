@@ -14,7 +14,7 @@ class GenerateFlashcardsTool(BaseTool):
         "Create flashcards (front/back pairs) for spaced repetition "
         "study. Returns JSON and saves as CSV."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {"type": "string", "description": "Flashcard topic"},

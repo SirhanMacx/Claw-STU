@@ -13,7 +13,7 @@ class GenerateWorksheetTool(BaseTool):
         "Generate a scaffolded worksheet with practice problems "
         "calibrated to the student's current ZPD tier."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {"type": "string", "description": "Topic for the worksheet"},

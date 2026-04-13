@@ -22,7 +22,7 @@ from clawstu.agent.base_tool import ToolContext
 from clawstu.agent.prompt import build_stuart_prompt
 from clawstu.agent.registry import ToolRegistry
 from clawstu.memory.store import BrainStore
-from clawstu.orchestrator.providers import LLMMessage, LLMProvider
+from clawstu.orchestrator.providers import LLMMessage
 from clawstu.orchestrator.router import ModelRouter
 from clawstu.orchestrator.task_kinds import TaskKind
 from clawstu.profile.model import LearnerProfile

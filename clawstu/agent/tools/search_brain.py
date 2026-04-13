@@ -14,7 +14,7 @@ class SearchBrainTool(BaseTool):
         "Search Stuart's brain (memory store) for relevant "
         "concept pages, session notes, and topic knowledge."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query"},

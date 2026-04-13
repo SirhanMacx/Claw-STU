@@ -13,7 +13,7 @@ class GenerateSimulationTool(BaseTool):
         "Create an interactive HTML+JS simulation where the "
         "student makes decisions and sees consequences."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {"type": "string", "description": "Topic for the simulation"},

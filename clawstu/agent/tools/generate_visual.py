@@ -13,7 +13,7 @@ class GenerateVisualTool(BaseTool):
         "Create a visual aid: timeline, concept map, cause-effect "
         "diagram, or Venn diagram as HTML/SVG."
     )
-    parameters: dict[str, Any] = {
+    parameters: dict[str, Any] = {  # noqa: RUF012
         "type": "object",
         "properties": {
             "topic": {"type": "string", "description": "Topic for the visual"},
