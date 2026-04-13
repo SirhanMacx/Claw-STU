@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses date-based versioning (e.g. `4.12.2026`)
 following the Claw-ED naming convention.
 
+## v4.13.2026.0 — 2026-04-13
+
+### Added — Stuart v5: Full Ed Parity
+- **Agent loop** (`clawstu/agent/`) — tool-use agent loop with max 10 iterations, approval policy (max 3 generations/turn), composable system prompt with learner context
+- **9 generation tools** — worksheet, game, visual, simulation, animation, slides, study guide, practice test, flashcards — each reads learner profile (ZPD, age, modality) and generates at the right level
+- **4 export tools** — PDF (WeasyPrint), DOCX (python-docx), standalone HTML, flashcards (CSV/Anki)
+- **4 retrieval tools** — web search (DuckDuckGo, age-filtered), teacher materials (shared KB bridge), brain search, source fetch
+- **4 memory tools** — read profile, search brain, write notes, read misconceptions
+- **Tool auto-discovery** — `ToolRegistry` discovers all `BaseTool` subclasses from `agent/tools/`
+- **7 new CLI commands** — `generate`, `export`, `search`, `practice`, `flashcards`, `game`, `ingest`
+- **5 new Telegram commands** — `/game`, `/practice`, `/flashcards`, `/study`, `/export`
+- **Shared KB bridge** — `SHARED_KB_PATH` env var lets Stuart query Ed's ingested curriculum
+- **Architecture spec** — `docs/superpowers/specs/2026-04-13-stuart-v5-parity-design.md`
+
+### Changed
+- Auth default changed from `dev` to `generate` — fresh installs are never wide-open
+- Health endpoint strips verbose error details from public response
+- HEARTBEAT CI workflow added (function size + exception swallow checks)
+- Full HEARTBEAT compliance: 14 functions decomposed, 11 annotated as single-responsibility
+- Exception audit: 0 bare `except Exception: pass` remaining
+
+### Fixed
+- 2 mypy strict errors from decomposition (topic type, ask return)
+
 ## v4.12.2026.1 — 2026-04-12
 
 ### Security

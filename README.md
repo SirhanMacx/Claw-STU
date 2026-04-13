@@ -201,12 +201,13 @@ PRs welcome. Built by a teacher in New York. Every design choice lives in `docs/
 | Tier | Features |
 |---|---|
 | **Stable** | Adaptive session loop, ZPD calibration, modality rotation, 5 LLM providers (Anthropic / OpenAI / Google Gemini via REST API — no SDK required / Ollama / OpenRouter), ModelRouter with fallback chain, InboundSafetyGate + CRISIS_PAUSE, brain pages + dream cycle, SQLite persistence, topic-aware live-content onboarding (REST + WebSocket), Socratic dialogue via ReasoningChain, `clawstu learn` CLI, `clawstu setup` wizard, profile export/import |
-| **Beta** | Web UI at localhost:8000, Telegram bot, Chrome extension, MCP server, WebSocket live sessions, per-student concept wiki, spaced review, scheduler (5 nightly tasks) |
+| **Beta** | Web UI at localhost:8000, Telegram bot (learn/ask/progress/game/practice/flashcards/study/export), Chrome extension, MCP server, WebSocket live sessions, per-student concept wiki, spaced review, scheduler (5 nightly tasks) |
+| **v5 (New)** | **Agent loop** with 20 auto-discovered tools, **9 generation tools** (worksheet, game, visual, simulation, animation, slides, study guide, practice test, flashcards), **4 export tools** (PDF, DOCX, HTML, flashcards CSV), **4 retrieval tools** (web search, teacher materials, brain search, source fetch), **7 new CLI commands** (generate, export, search, practice, flashcards, game, ingest), shared KB bridge with Claw-ED |
 | **Experimental** | ONNX MiniLM embeddings (ships as NullEmbeddings stub; vector search degrades to keyword-only until real model is bootstrapped), per-learner scheduler iteration |
 
 ## Status
 
-v4.12.2026.1 on PyPI. 670 tests, mypy `--strict` clean on 90 source files, under 2 seconds runtime. CI green on Python 3.11 + 3.12.
+v4.13.2026.0 on PyPI. 714 tests, mypy `--strict` clean, under 2 seconds runtime. CI + HEARTBEAT green on Python 3.11 + 3.12.
 
 ---
 
