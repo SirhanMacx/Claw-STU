@@ -32,6 +32,8 @@ class ApprovalPolicy:
         "search_brain",
         "read_misconceptions",
         "write_note",
+        "define_learning_goals",
+        "check_learning_goals",
     })
 
     REQUIRES_GENERATION_BUDGET: ClassVar[frozenset[str]] = frozenset({
