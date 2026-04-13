@@ -64,7 +64,7 @@ class SearchBrainTool(BaseTool):
         for q in queries:
             q_lower = q.lower()
             for page in pages:
-                key = getattr(page, "page_key", None) or id(page)
+                key = str(getattr(page, "page_key", None) or id(page))
                 if key in seen_keys:
                     continue
                 rendered = page.render()
