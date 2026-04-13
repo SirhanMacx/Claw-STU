@@ -101,13 +101,24 @@ class AgentLoop:
         """Run the agent loop for one student turn.
 
         1. Inbound safety gate
-        2. Build system prompt
-        3. LLM call with tools
-        4. Tool execution loop (max 10 iterations)
-        5. Outbound content filter
+        2. Build system prompt + resolve provider
+        3. Tool-use iteration loop (max 10)
+        4. Outbound content filter
         """
-        # -- 1. Inbound safety gate ------------------------------------
-        decision = self._gate.scan(student_message)
+        gate_result = self._check_safety_gate(student_message)
+        if gate_result is not None:
+            return gate_result
+
+        system_prompt = self._build_turn_prompt(session_id, brain_context)
+        provider, model = self._router.for_task(TaskKind.BLOCK_GENERATION)
+
+        return await self._iterate(
+            student_message, system_prompt, provider, model, session_id,
+        )
+
+    def _check_safety_gate(self, message: str) -> AgentResult | None:
+        """Return an AgentResult if the message triggers crisis/boundary."""
+        decision = self._gate.scan(message)
         if decision.action == "crisis":
             return AgentResult(
                 text="I need to pause our session. If you're in crisis, "
@@ -115,34 +126,41 @@ class AgentLoop:
                 "(call or text 988).",
             )
         if decision.action == "boundary":
-            violation = decision.boundary_violation
+            v = decision.boundary_violation
+            kind = v.kind.value if v else "boundary"
             return AgentResult(
                 text=f"I'm Stuart, your learning companion. "
-                f"I can't do that ({violation.kind.value if violation else 'boundary'}). "
-                f"Let's get back to learning!",
+                f"I can't do that ({kind}). Let's get back to learning!",
             )
+        return None
 
-        # -- 2. Build system prompt ------------------------------------
-        tool_names = self._tools.tool_names()
-        system_prompt = build_stuart_prompt(
+    def _build_turn_prompt(
+        self, session_id: str, brain_context: str,
+    ) -> str:
+        """Compose the system prompt for this turn."""
+        return build_stuart_prompt(
             profile=self._profile,
             session_id=session_id,
             brain_context=brain_context,
-            tool_names=tool_names,
+            tool_names=self._tools.tool_names(),
         )
 
-        # -- 3. Resolve provider/model ---------------------------------
-        provider, model = self._router.for_task(TaskKind.BLOCK_GENERATION)
-
-        # -- 4. Agent loop ---------------------------------------------
+    async def _iterate(
+        self,
+        student_message: str,
+        system_prompt: str,
+        provider: object,
+        model: str,
+        session_id: str,
+    ) -> AgentResult:
+        """Run the think-tool-observe loop up to MAX_ITERATIONS."""
         messages: list[LLMMessage] = [
             LLMMessage(role="user", content=student_message),
         ]
-
         turn_state = TurnState()
         tool_records: list[ToolCallRecord] = []
         artifacts: list[Path] = []
-        tool_context = ToolContext(
+        ctx = ToolContext(
             profile=self._profile,
             session_id=session_id,
             brain=self._brain,
@@ -152,68 +170,64 @@ class AgentLoop:
         )
 
         for iteration in range(MAX_ITERATIONS):
-            response = await provider.complete(
+            response = await provider.complete(  # type: ignore[union-attr]
                 system=system_prompt,
                 messages=messages,
                 model=model,
                 max_tokens=2048,
             )
-
-            response_text = response.text
-
-            # Check if the response contains a tool call (JSON block)
-            tool_call = self._parse_tool_call(response_text)
+            tool_call = self._parse_tool_call(response.text)
             if tool_call is None:
-                # Final text response -- filter and return
-                filtered_text = self._filter_outbound(response_text)
+                filtered = self._filter_outbound(response.text)
                 return AgentResult(
-                    text=filtered_text,
-                    artifacts=artifacts,
-                    tool_calls=tool_records,
-                    iterations=iteration + 1,
+                    text=filtered, artifacts=artifacts,
+                    tool_calls=tool_records, iterations=iteration + 1,
                 )
-
-            # -- Tool execution ----------------------------------------
-            tool_name = tool_call.get("name", "")
-            tool_args = tool_call.get("arguments", {})
-
-            approved = self._approval.check(tool_name, turn_state)
-            start = time.monotonic()
-
-            if not approved:
-                result_text = (
-                    f"BLOCKED: '{tool_name}' not approved "
-                    f"(generation budget: {turn_state.generation_count}/"
-                    f"{MAX_GENERATIONS_PER_TURN})."
-                )
-            else:
-                result_text = await self._tools.execute(
-                    tool_name, tool_args, tool_context,
-                )
-
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            tool_records.append(ToolCallRecord(
-                tool_name=tool_name,
-                arguments=tool_args,
-                result_summary=result_text[:200],
-                duration_ms=elapsed_ms,
-                approved=approved,
-            ))
-
-            # Feed tool result back to LLM
-            messages.append(LLMMessage(role="assistant", content=response_text))
+            record = await self._execute_tool(
+                tool_call, turn_state, ctx,
+            )
+            tool_records.append(record)
+            messages.append(LLMMessage(role="assistant", content=response.text))
             messages.append(LLMMessage(
                 role="user",
-                content=f"Tool result for {tool_name}:\n{result_text}",
+                content=f"Tool result for {record.tool_name}:\n{record.result_summary}",
             ))
 
-        # -- Iteration cap hit -----------------------------------------
         return AgentResult(
             text="Let me simplify. Here's what I have so far -- "
             "would you like me to continue?",
-            artifacts=artifacts,
-            tool_calls=tool_records,
+            artifacts=artifacts, tool_calls=tool_records,
             iterations=MAX_ITERATIONS,
+        )
+
+    async def _execute_tool(
+        self,
+        tool_call: dict[str, Any],
+        turn_state: TurnState,
+        ctx: ToolContext,
+    ) -> ToolCallRecord:
+        """Execute a single tool call with approval + timing."""
+        tool_name = tool_call.get("name", "")
+        tool_args = tool_call.get("arguments", {})
+        approved = self._approval.check(tool_name, turn_state)
+        start = time.monotonic()
+
+        if not approved:
+            result_text = (
+                f"BLOCKED: '{tool_name}' not approved "
+                f"(generation budget: {turn_state.generation_count}/"
+                f"{MAX_GENERATIONS_PER_TURN})."
+            )
+        else:
+            result_text = await self._tools.execute(
+                tool_name, tool_args, ctx,
+            )
+
+        return ToolCallRecord(
+            tool_name=tool_name, arguments=tool_args,
+            result_summary=result_text[:200],
+            duration_ms=int((time.monotonic() - start) * 1000),
+            approved=approved,
         )
 
     def _parse_tool_call(self, text: str) -> dict[str, Any] | None:
