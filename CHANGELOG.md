@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses date-based versioning (e.g. `4.12.2026`)
 following the Claw-ED naming convention.
 
+## v4.13.2026.1 — 2026-04-13
+
+### Added — Competitive Borrowing (DeepTutor, Karpathy Skills, Multica)
+- **Behavioral contract** in system prompt — 5 principles: check before advancing, minimal explanation first, surface misconceptions, one thing at a time, goals before teaching
+- **Goal-driven learning loops** — `define_learning_goals` + `check_learning_goals` tools; Stuart sets verifiable objectives before teaching and checks them after
+- **Query diversification** in brain search — 3 query variants (original, reversed, keyword-extracted) with deduplication for better retrieval
+- **Template compounding** — `TemplatePage` brain page type + `save_template` / `find_template` tools; successful generations persist as proven templates for reuse
+- **Surgical feedback** — evaluator now returns `primary_feedback` (one thing to focus on) + `deferred_feedback` (save for later)
+- **Assumption surfacing** — first-turn protocol: Stuart states 3 assumptions about student knowledge and asks to confirm before teaching
+- **Session resumption** — `clawstu resume <session-id>` loads full profile + session state and drops back into the teach loop
+- **Incremental KB addition** — `BrainStore.add_document()` for adding content without full re-index
+- **Mode-aware agent hints** — offers EXPLAIN/QUIZ/GAME/VISUAL/PRACTICE based on learner's best-performing modality
+
 ## v4.13.2026.0 — 2026-04-13
 
 ### Added — Stuart v5: Full Ed Parity
