@@ -1,3 +1,3 @@
 """Claw-STU — Stuart, a personal learning agent."""
 
-__version__ = "4.12.2026.1"
+__version__ = "4.13.2026.0"
