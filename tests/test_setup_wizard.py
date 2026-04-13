@@ -765,7 +765,7 @@ class TestApiKeyField:
         assert key == "google_api_key"
         assert label == "Google Gemini"
 
-    def test_unknown_raises(self) -> None:
+    def test_api_key_unknown_raises(self) -> None:
         with pytest.raises(ValueError, match="no api-key field"):
             _api_key_field("banana")
 
@@ -783,7 +783,7 @@ class TestDefaultBaseUrl:
         url = _default_base_url("ollama", cfg)
         assert url == cfg.ollama_base_url
 
-    def test_unknown_raises(self) -> None:
+    def test_base_url_unknown_raises(self) -> None:
         with pytest.raises(ValueError, match="no default base URL"):
             _default_base_url("banana", AppConfig())
 

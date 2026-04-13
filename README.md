@@ -207,7 +207,7 @@ PRs welcome. Built by a teacher in New York. Every design choice lives in `docs/
 
 ## Status
 
-v4.13.2026.0 on PyPI. 714 tests, mypy `--strict` clean, under 2 seconds runtime. CI + HEARTBEAT green on Python 3.11 + 3.12.
+v4.13.2026.1 on PyPI. 755 tests, mypy `--strict` clean on 122 source files, under 2 seconds runtime. CI + HEARTBEAT green on Python 3.11 + 3.12.
 
 ---
 

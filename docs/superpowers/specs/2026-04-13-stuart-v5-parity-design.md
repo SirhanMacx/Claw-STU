@@ -488,26 +488,27 @@ The prompt is rebuilt on every turn. Learner context is fresh, not stale.
 class ToolRegistry:
     """Auto-discovers tool modules from the tools/ directory."""
 
-    def discover(self) -> None:
-        """Scan agent/tools/ for modules with a TOOL_DEF attribute."""
+    def discover_from(self, path: Path) -> None:
+        """Scan path for BaseTool subclasses via importlib."""
         ...
 
-    def get_definitions(self) -> list[ToolDefinition]:
-        """Return Anthropic tool-use format definitions for all tools."""
+    def tool_definitions(self) -> list[dict]:
+        """Return tool schemas for LLM tool-use format."""
         ...
 
     def execute(
         self,
         tool_name: str,
         tool_args: dict[str, Any],
-        learner_context: LearnerContext,
-    ) -> Any:
+        context: ToolContext,
+    ) -> str:
         """Look up and execute a tool by name."""
         ...
 ```
 
-Each tool module exports a `TOOL_DEF: ToolDefinition` and an `execute` async
-function. New tools are added by dropping a file in `agent/tools/`.
+Each tool is a `BaseTool` subclass with `name`, `description`, `parameters`
+(JSON Schema), and an async `execute(args, context)` method. The registry
+auto-discovers all subclasses from `.py` files in `agent/tools/`.
 
 ---
 
@@ -531,5 +532,5 @@ CLI commands.
 
 ## 17. Version
 
-This spec targets **v4.13.2026.0** (Claw-STU). The version bump signals the
-architectural shift from "session runner" to "personal learning agent."
+Shipped as **v4.13.2026.1** (Claw-STU). All 6 phases implemented. 26 tools
+auto-discovered, 755 tests passing, CI + HEARTBEAT green.

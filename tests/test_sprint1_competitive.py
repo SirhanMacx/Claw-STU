@@ -96,7 +96,7 @@ class TestBehavioralContract:
 
 
 class TestDefineLearningGoals:
-    def test_schema_valid(self) -> None:
+    def test_define_goals_schema_valid(self) -> None:
         tool = DefineLearningGoalsTool()
         schema = tool.schema()
         assert schema["function"]["name"] == "define_learning_goals"
@@ -131,7 +131,7 @@ class TestDefineLearningGoals:
 
 
 class TestCheckLearningGoals:
-    def test_schema_valid(self) -> None:
+    def test_check_goals_schema_valid(self) -> None:
         tool = CheckLearningGoalsTool()
         schema = tool.schema()
         assert schema["function"]["name"] == "check_learning_goals"

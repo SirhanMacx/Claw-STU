@@ -17,7 +17,10 @@ from clawstu.api.state import AppState, get_state
 
 
 @pytest.fixture()
-def client() -> Iterator[TestClient]:
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    # Explicit auth bypass: STU defaults to "generate" mode in production.
+    # Tests run with "dev" so API calls succeed without Bearer tokens.
+    monkeypatch.setenv("STU_AUTH_MODE", "dev")
     app = create_app()
     # Replace the app state with a fresh instance so tests don't leak
     # sessions between each other.
