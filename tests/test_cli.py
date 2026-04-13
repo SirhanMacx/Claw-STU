@@ -42,6 +42,13 @@ def test_help_mentions_every_command() -> None:
         "doctor",
         "scheduler",
         "profile",
+        "generate",
+        "export",
+        "search",
+        "practice",
+        "flashcards",
+        "game",
+        "ingest",
     ):
         assert command in stdout, f"--help missing '{command}'"
 

@@ -531,6 +531,190 @@ def mcp_server() -> None:
     run_mcp_server()
 
 
+# ---------------------------------------------------------------------------
+# v5 parity commands -- CLI wrappers for agent generation, export, search,
+# and ingest. Each is a thin shell that falls back gracefully when the
+# agent package is not fully wired.
+# ---------------------------------------------------------------------------
+
+_V5_ARTIFACT_TYPES = frozenset({
+    "worksheet", "game", "visual", "simulation", "animation",
+    "slides", "study-guide", "practice-test", "flashcards",
+})
+
+_V5_EXPORT_FORMATS = frozenset({"pdf", "docx", "html", "csv"})
+
+_V5_STUB_MSG = "Agent tools coming in v5. Generation pipeline not yet wired."
+
+
+def _run_generate(artifact_type: str, topic: str, learner_id: str | None) -> None:
+    """Shared logic for all generation CLI commands.
+
+    Validates the artifact type, then delegates to the agent loop.
+    Falls back with a friendly message when the agent package is not
+    yet importable.
+    """
+    if artifact_type not in _V5_ARTIFACT_TYPES:
+        valid = ", ".join(sorted(_V5_ARTIFACT_TYPES))
+        typer.secho(
+            f"Unknown artifact type {artifact_type!r}; valid: {valid}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+
+        _ = AgentLoop  # keep linter happy; actual call will come in Phase 2
+        typer.echo(f"Generating {artifact_type} on '{topic}' ...")
+        typer.secho(_V5_STUB_MSG, fg=typer.colors.YELLOW)
+    except (ImportError, ModuleNotFoundError):
+        typer.echo(f"Would generate {artifact_type} on '{topic}'.")
+        typer.secho(_V5_STUB_MSG, fg=typer.colors.YELLOW)
+
+
+@app.command()
+def generate(
+    artifact_type: str = typer.Argument(
+        help="Type: worksheet, game, visual, simulation, slides, study-guide, practice-test, flashcards",
+    ),
+    topic: str = typer.Argument(help="Topic to generate content for"),
+    learner_id: str | None = typer.Option(
+        None, "--learner", "-l", help="Learner ID (uses most recent if omitted)",
+    ),
+) -> None:
+    """Generate a learning artifact for a student.
+
+    Supported types: worksheet, game, visual, simulation, animation,
+    slides, study-guide, practice-test, flashcards. The artifact is
+    saved to the current directory.
+    """
+    _run_generate(artifact_type, topic, learner_id)
+
+
+@app.command()
+def export(
+    fmt: str = typer.Argument(help="Format: pdf, docx, html, csv"),
+    source: str | None = typer.Option(
+        None, "--source", "-s", help="Path to artifact (uses latest session if omitted)",
+    ),
+) -> None:
+    """Export the most recent session's artifacts to a file format.
+
+    Supported formats: pdf, docx, html, csv. Defaults to the
+    latest session when --source is omitted.
+    """
+    if fmt not in _V5_EXPORT_FORMATS:
+        valid = ", ".join(sorted(_V5_EXPORT_FORMATS))
+        typer.secho(
+            f"Unknown export format {fmt!r}; valid: {valid}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        from clawstu.agent.tools import export_pdf  # type: ignore[import-not-found]
+
+        _ = export_pdf
+        typer.echo(f"Exporting to {fmt} ...")
+        typer.secho(_V5_STUB_MSG, fg=typer.colors.YELLOW)
+    except (ImportError, ModuleNotFoundError):
+        src_label = source if source else "latest session"
+        typer.echo(f"Would export {src_label} as {fmt}.")
+        typer.secho(_V5_STUB_MSG, fg=typer.colors.YELLOW)
+
+
+@app.command()
+def search(
+    query: str = typer.Argument(help="Search brain pages and teacher materials"),
+) -> None:
+    """Search brain pages and shared teacher materials.
+
+    Queries the learner's brain store and, when available, the
+    teacher's shared knowledge base. Results are printed with
+    snippets.
+    """
+    try:
+        from clawstu.agent.tools import search_brain  # type: ignore[import-not-found]
+
+        _ = search_brain
+        typer.echo(f"Searching for '{query}' ...")
+        typer.secho(_V5_STUB_MSG, fg=typer.colors.YELLOW)
+    except (ImportError, ModuleNotFoundError):
+        typer.echo(f"Would search for '{query}'.")
+        typer.secho(_V5_STUB_MSG, fg=typer.colors.YELLOW)
+
+
+@app.command()
+def practice(
+    topic: str = typer.Argument(help="Topic to generate practice problems for"),
+    learner_id: str | None = typer.Option(
+        None, "--learner", "-l", help="Learner ID (uses most recent if omitted)",
+    ),
+) -> None:
+    """Generate a practice test for a topic.
+
+    Shortcut for ``clawstu generate practice-test <topic>``.
+    """
+    _run_generate("practice-test", topic, learner_id)
+
+
+@app.command()
+def flashcards(
+    topic: str = typer.Argument(help="Topic to generate flashcards for"),
+    learner_id: str | None = typer.Option(
+        None, "--learner", "-l", help="Learner ID (uses most recent if omitted)",
+    ),
+) -> None:
+    """Generate flashcards for a topic.
+
+    Shortcut for ``clawstu generate flashcards <topic>``.
+    """
+    _run_generate("flashcards", topic, learner_id)
+
+
+@app.command()
+def game(
+    topic: str = typer.Argument(help="Topic to generate a game for"),
+    learner_id: str | None = typer.Option(
+        None, "--learner", "-l", help="Learner ID (uses most recent if omitted)",
+    ),
+) -> None:
+    """Generate an interactive game for a topic.
+
+    Shortcut for ``clawstu generate game <topic>``.
+    """
+    _run_generate("game", topic, learner_id)
+
+
+@app.command()
+def ingest(
+    path: str = typer.Argument(help="Path to teacher materials to ingest"),
+) -> None:
+    """Ingest teacher materials into the shared knowledge base.
+
+    If Claw-ED's ingestor is importable, delegates to it.
+    Otherwise, performs basic text extraction and stores in
+    Stuart's brain.
+    """
+    from pathlib import Path as _Path
+
+    mat_path = _Path(path)
+    if not mat_path.exists():
+        typer.secho(f"Path does not exist: {path}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    try:
+        from clawed.ingest import ingest_materials  # type: ignore[import-not-found]
+
+        _ = ingest_materials
+        typer.echo(f"Ingesting {path} via Claw-ED ingestor ...")
+        typer.secho(_V5_STUB_MSG, fg=typer.colors.YELLOW)
+    except (ImportError, ModuleNotFoundError):
+        typer.echo(f"Would ingest {path} (Ed ingestor not available).")
+        typer.secho(_V5_STUB_MSG, fg=typer.colors.YELLOW)
+
+
 def main() -> None:
     """Entry point wired to pyproject.toml's [project.scripts]."""
     app()

@@ -95,7 +95,9 @@ _ALLOWED: dict[str, frozenset[str]] = {
     ),
     # cli is effectively api-layer (top); allow everything plus the
     # top-level setup_wizard, cli_chat, cli_state, cli_companions,
-    # and mcp_server sibling modules.
+    # and mcp_server sibling modules. `agent` was added for v5 parity
+    # commands (generate, export, search, etc.) which attempt guarded
+    # imports from clawstu.agent with graceful ImportError fallback.
     "_cli": frozenset(
         {
             "safety",
@@ -114,6 +116,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "cli_companions",
             "mcp_server",
             "bot",
+            "agent",
         }
     ),
     # setup_wizard is a sibling of cli.py — also a top-level module.

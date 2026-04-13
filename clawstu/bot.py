@@ -48,11 +48,18 @@ _sessions: dict[int, _BotSession] = {}
 
 _GATE = InboundSafetyGate(EscalationHandler(), BoundaryEnforcer())
 
+_V5_STUB_MSG = "Agent tools coming in v5. Generation pipeline not yet wired."
+
 _HELP_TEXT = (
     "Available commands:\n"
     "/start -- greeting\n"
     "/learn <topic> -- start a learning session\n"
     "/ask <question> -- one-shot Socratic Q&A\n"
+    "/game <topic> -- generate an interactive game\n"
+    "/practice <topic> -- generate practice problems\n"
+    "/flashcards <topic> -- generate flashcards\n"
+    "/study <topic> -- generate a study guide\n"
+    "/export -- export current session artifacts\n"
     "/progress -- your progress dashboard\n"
     "/quit -- close the current session\n"
     "/help -- this message"
@@ -272,6 +279,120 @@ async def _handle_message(update: Any, context: Any) -> None:
     await _bot_send_directive(update, directive)
 
 
+# ---------------------------------------------------------------------------
+# v5 parity handlers -- generation, export, study commands
+# ---------------------------------------------------------------------------
+
+
+async def _handle_game(update: Any, context: Any) -> None:
+    """Handle /game <topic> -- generate an interactive game."""
+    args: list[str] = context.args or []
+    if not args:
+        await update.message.reply_text("Usage: /game <topic>\nExample: /game photosynthesis")
+        return
+
+    topic = " ".join(args)
+    try:
+        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+
+        _ = AgentLoop
+        await update.message.reply_text(f"Generating game on: {topic}...")
+        await update.message.reply_text(_V5_STUB_MSG)
+    except (ImportError, ModuleNotFoundError):
+        await update.message.reply_text(
+            f"Would generate a game on '{topic}'.\n{_V5_STUB_MSG}"
+        )
+
+
+async def _handle_practice(update: Any, context: Any) -> None:
+    """Handle /practice <topic> -- generate practice problems."""
+    args: list[str] = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "Usage: /practice <topic>\nExample: /practice quadratic equations"
+        )
+        return
+
+    topic = " ".join(args)
+    try:
+        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+
+        _ = AgentLoop
+        await update.message.reply_text(f"Generating practice on: {topic}...")
+        await update.message.reply_text(_V5_STUB_MSG)
+    except (ImportError, ModuleNotFoundError):
+        await update.message.reply_text(
+            f"Would generate practice problems on '{topic}'.\n{_V5_STUB_MSG}"
+        )
+
+
+async def _handle_flashcards(update: Any, context: Any) -> None:
+    """Handle /flashcards <topic> -- generate flashcards."""
+    args: list[str] = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "Usage: /flashcards <topic>\nExample: /flashcards cell biology"
+        )
+        return
+
+    topic = " ".join(args)
+    try:
+        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+
+        _ = AgentLoop
+        await update.message.reply_text(f"Generating flashcards on: {topic}...")
+        await update.message.reply_text(_V5_STUB_MSG)
+    except (ImportError, ModuleNotFoundError):
+        await update.message.reply_text(
+            f"Would generate flashcards on '{topic}'.\n{_V5_STUB_MSG}"
+        )
+
+
+async def _handle_study(update: Any, context: Any) -> None:
+    """Handle /study <topic> -- generate a study guide."""
+    args: list[str] = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "Usage: /study <topic>\nExample: /study French Revolution"
+        )
+        return
+
+    topic = " ".join(args)
+    try:
+        from clawstu.agent.loop import AgentLoop  # type: ignore[import-not-found]
+
+        _ = AgentLoop
+        await update.message.reply_text(f"Generating study guide on: {topic}...")
+        await update.message.reply_text(_V5_STUB_MSG)
+    except (ImportError, ModuleNotFoundError):
+        await update.message.reply_text(
+            f"Would generate a study guide on '{topic}'.\n{_V5_STUB_MSG}"
+        )
+
+
+async def _handle_export(update: Any, context: Any) -> None:
+    """Handle /export -- export current session artifacts."""
+    chat_id: int = update.effective_chat.id
+    bot_session = _sessions.get(chat_id)
+    if bot_session is None:
+        await update.message.reply_text(
+            "No active session. Start one with /learn <topic> first."
+        )
+        return
+
+    try:
+        from clawstu.agent.tools import export_pdf  # type: ignore[import-not-found]
+
+        _ = export_pdf
+        await update.message.reply_text("Exporting session artifacts...")
+        await update.message.reply_text(_V5_STUB_MSG)
+    except (ImportError, ModuleNotFoundError):
+        await update.message.reply_text(
+            f"Would export artifacts for session on '{bot_session.session.topic}'."
+            f"\n{_V5_STUB_MSG}"
+        )
+
+
 def run_bot(*, token: str) -> None:
     """Start the Telegram bot in polling mode.
 
@@ -297,6 +418,11 @@ def run_bot(*, token: str) -> None:
     application.add_handler(CommandHandler("help", _handle_help))
     application.add_handler(CommandHandler("learn", _handle_learn))
     application.add_handler(CommandHandler("ask", _handle_ask))
+    application.add_handler(CommandHandler("game", _handle_game))
+    application.add_handler(CommandHandler("practice", _handle_practice))
+    application.add_handler(CommandHandler("flashcards", _handle_flashcards))
+    application.add_handler(CommandHandler("study", _handle_study))
+    application.add_handler(CommandHandler("export", _handle_export))
     application.add_handler(CommandHandler("progress", _handle_progress))
     application.add_handler(CommandHandler("quit", _handle_quit))
     application.add_handler(
