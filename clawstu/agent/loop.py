@@ -22,7 +22,7 @@ from clawstu.agent.base_tool import ToolContext
 from clawstu.agent.prompt import build_stuart_prompt
 from clawstu.agent.registry import ToolRegistry
 from clawstu.memory.store import BrainStore
-from clawstu.orchestrator.providers import LLMMessage
+from clawstu.orchestrator.providers import LLMMessage, LLMProvider
 from clawstu.orchestrator.router import ModelRouter
 from clawstu.orchestrator.task_kinds import TaskKind
 from clawstu.profile.model import LearnerProfile
@@ -149,7 +149,7 @@ class AgentLoop:
         self,
         student_message: str,
         system_prompt: str,
-        provider: object,
+        provider: LLMProvider,
         model: str,
         session_id: str,
     ) -> AgentResult:
@@ -170,7 +170,7 @@ class AgentLoop:
         )
 
         for iteration in range(MAX_ITERATIONS):
-            response = await provider.complete(  # type: ignore[union-attr]
+            response = await provider.complete(
                 system=system_prompt,
                 messages=messages,
                 model=model,
