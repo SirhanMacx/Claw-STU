@@ -64,6 +64,7 @@ class PageKind(str, Enum):
     SOURCE = "source"
     MISCONCEPTION = "misconception"
     TOPIC = "topic"
+    TEMPLATE = "template"
 
 
 class TimelineEntry(BaseModel):
@@ -93,6 +94,8 @@ def _format_scalar(value: Any) -> str:
         return value.isoformat()
     if isinstance(value, Enum):
         return str(value.value)
+    if isinstance(value, float):
+        return str(value)
     if isinstance(value, (int, str)):
         return str(value)
     raise TypeError(

@@ -22,6 +22,7 @@ from clawstu.memory.pages.learner import LearnerPage
 from clawstu.memory.pages.misconception import MisconceptionPage
 from clawstu.memory.pages.session import SessionPage
 from clawstu.memory.pages.source import SourcePage
+from clawstu.memory.pages.template import TemplatePage
 from clawstu.memory.pages.topic import TopicPage
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "PageKind",
     "SessionPage",
     "SourcePage",
+    "TemplatePage",
     "TimelineEntry",
     "TopicPage",
     "parse_frontmatter",

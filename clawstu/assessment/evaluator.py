@@ -40,6 +40,8 @@ class EvaluationResult(BaseModel):
     score: float  # 0.0 to 1.0, fractional credit for rubric-scored items
     rubric_hits: tuple[str, ...] = Field(default_factory=tuple)
     notes: str | None = None
+    primary_feedback: str = ""  # the ONE thing to focus on right now
+    deferred_feedback: tuple[str, ...] = Field(default_factory=tuple)
 
 
 class Evaluator:
@@ -69,10 +71,12 @@ class Evaluator:
                 f"item {item.id} has no canonical answer for exact evaluation"
             )
         correct = _normalize(response) == _normalize(item.canonical_answer)
+        primary = "" if correct else _exact_primary_feedback(item)
         return EvaluationResult(
             item_id=item.id,
             correct=correct,
             score=1.0 if correct else 0.0,
+            primary_feedback=primary,
         )
 
     @staticmethod
@@ -94,6 +98,7 @@ class Evaluator:
 
         response_tokens = set(_tokenize(response))
         hits: list[str] = []
+        misses: list[str] = []
         for point in rubric:
             point_tokens = set(_tokenize(point))
             if not point_tokens:
@@ -105,15 +110,41 @@ class Evaluator:
             # for phrasing.
             if overlap:
                 hits.append(point)
+            else:
+                misses.append(point)
 
         score = len(hits) / len(rubric) if rubric else 0.0
         correct = score >= _CRQ_RUBRIC_PASS_FRACTION
+        primary, deferred = _surgical_feedback(misses)
         return EvaluationResult(
             item_id=item.id,
             correct=correct,
             score=score,
             rubric_hits=tuple(hits),
+            primary_feedback=primary,
+            deferred_feedback=tuple(deferred),
         )
+
+
+# -- surgical feedback helpers ----------------------------------------
+
+
+def _surgical_feedback(misses: list[str]) -> tuple[str, list[str]]:
+    """Pick the single most important miss as primary feedback.
+
+    The first missed rubric point is treated as the primary issue;
+    remaining misses are deferred so the student is not overwhelmed.
+    Returns ``(primary, deferred)`` where primary is empty when no
+    rubric points were missed.
+    """
+    if not misses:
+        return "", []
+    return misses[0], misses[1:]
+
+
+def _exact_primary_feedback(item: AssessmentItem) -> str:
+    """Build primary feedback for a wrong exact-match answer."""
+    return f"Review the concept: {item.concept}"
 
 
 # Small token-normalization helpers. Kept free-function so the evaluator
