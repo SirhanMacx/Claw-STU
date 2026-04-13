@@ -51,6 +51,7 @@ from clawstu.memory.pages import (
     PageKind,
     SessionPage,
     SourcePage,
+    TemplatePage,
     TopicPage,
 )
 
@@ -93,6 +94,8 @@ def _page_id(page: BrainPage) -> str:
         return page.misconception_id
     if isinstance(page, TopicPage):
         return page.topic_id
+    if isinstance(page, TemplatePage):
+        return page.template_id
     raise TypeError(f"unsupported page type: {type(page).__name__}")
 
 
@@ -110,6 +113,8 @@ def _parse_for_kind(kind: PageKind, text: str) -> BrainPage:
         return MisconceptionPage.parse(text)
     if kind is PageKind.TOPIC:
         return TopicPage.parse(text)
+    if kind is PageKind.TEMPLATE:
+        return TemplatePage.parse(text)
     raise ValueError(f"unknown page kind: {kind}")
 
 
@@ -242,6 +247,34 @@ class BrainStore:
             return False
         target.unlink()
         return True
+
+    # -- incremental addition ------------------------------------------
+
+    def add_document(
+        self,
+        learner_id: str,
+        content: str,
+        source: str,
+        title: str,
+    ) -> str:
+        """Add a document to the brain store incrementally.
+
+        Creates a :class:`SourcePage` with the given content and stores
+        it immediately. Keyword search picks it up on the next query;
+        vector search picks it up on the next embedding refresh.
+
+        Returns the generated page key (``source_id``).
+        """
+        page_key = _slug(f"{learner_id}_{title}")
+        page = SourcePage(
+            source_id=page_key,
+            title=title,
+            attribution=source,
+            age_bracket="unknown",
+            compiled_truth=content,
+        )
+        self.put(page, learner_id=learner_id)
+        return page_key
 
     # -- atomic write helper -------------------------------------------
 

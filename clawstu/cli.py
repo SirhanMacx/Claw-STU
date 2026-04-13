@@ -253,17 +253,68 @@ def ask(
 
 @app.command()
 def resume(
+    session_id: str = typer.Argument(help="Session ID to resume"),
+    learner_id: str | None = typer.Option(
+        None, "--learner", "-l", help="Learner ID",
+    ),
+) -> None:
+    """Resume a previous learning session by session ID.
+
+    Loads persistence from disk, finds the session, and drops the
+    student back into the interactive chat loop with the existing
+    profile and session state. Lists available sessions when the
+    requested one is not found.
+    """
+    from clawstu.cli_chat import run_chat_session_from_bundle
+    from clawstu.cli_state import default_stores
+
+    stores = default_stores()
+    session = stores.persistence.sessions.get(session_id)
+    if session is None:
+        typer.secho(
+            f"Session {session_id!r} not found.", fg=typer.colors.RED,
+        )
+        all_sessions = stores.persistence.sessions.list_all()
+        if all_sessions:
+            typer.echo("Available sessions:")
+            for s in all_sessions:
+                typer.echo(f"  {s.id}  ({s.learner_id}, {s.domain.value})")
+        else:
+            typer.echo("No sessions found. Run `clawstu learn` first.")
+        raise typer.Exit(code=1)
+
+    resolved_lid = learner_id or session.learner_id
+    profile = stores.persistence.learners.get(resolved_lid)
+    if profile is None:
+        typer.secho(
+            f"Learner {resolved_lid!r} not found.", fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    # Rehydrate profile substores
+    profile.zpd_by_domain = stores.persistence.zpd.get_all(resolved_lid)
+    profile.modality_outcomes = stores.persistence.modality_outcomes.get_all(
+        resolved_lid,
+    )
+    profile.misconceptions = stores.persistence.misconceptions.get_all(
+        resolved_lid,
+    )
+    profile.events = stores.persistence.events.list_for_learner(resolved_lid)
+
+    run_chat_session_from_bundle(profile=profile, session=session)
+
+
+@app.command(name="warm-start")
+def warm_start(
     learner_id: str = typer.Argument(
         ..., help="Learner ID to resume."
     ),
 ) -> None:
-    """Resume a session from a pre-generated artifact.
+    """Warm-start from a pre-generated artifact.
 
-    Warm-starts by loading the most recent unconsumed
-    :class:`NextSessionArtifact` from persistence, constructing a
-    primed :class:`Session`, and dropping the student back into the
-    same chat loop ``learn`` uses. Raises a yellow "nothing to
-    resume" message when no artifact is available.
+    Loads the most recent unconsumed :class:`NextSessionArtifact`
+    from persistence, constructs a primed :class:`Session`, and
+    drops the student back into the same chat loop ``learn`` uses.
     """
     from clawstu.cli_chat import run_resume_session
     from clawstu.engagement.session import NoArtifactError

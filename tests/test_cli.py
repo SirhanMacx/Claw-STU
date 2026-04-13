@@ -275,10 +275,21 @@ def test_learn_command_rejects_unknown_domain(
     assert "not_a_real_domain" in stdout or "unknown" in stdout.lower()
 
 
-def test_resume_command_forwards_learner_id(
+def test_resume_command_session_not_found(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """`clawstu resume ada` calls ``run_resume_session(learner_id='ada')``."""
+    """`clawstu resume <bad-id>` exits 1 with a helpful message."""
+    monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
+    result = runner.invoke(app, ["resume", "no-such-session"])
+    assert result.exit_code == 1
+    stdout = _plain(result.stdout)
+    assert "not found" in stdout.lower()
+
+
+def test_warm_start_command_forwards_learner_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """`clawstu warm-start ada` calls ``run_resume_session(learner_id='ada')``."""
     monkeypatch.setenv("CLAW_STU_DATA_DIR", str(tmp_path))
     calls: list[Any] = []
 
@@ -289,12 +300,12 @@ def test_resume_command_forwards_learner_id(
         "clawstu.cli_chat.run_resume_session", _fake_run_resume_session,
     )
 
-    result = runner.invoke(app, ["resume", "ada"])
+    result = runner.invoke(app, ["warm-start", "ada"])
     assert result.exit_code == 0, result.stdout
     assert calls == [{"learner_id": "ada"}]
 
 
-def test_resume_command_without_artifact_reports_nothing_to_resume(
+def test_warm_start_command_without_artifact_reports_nothing_to_resume(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     """NoArtifactError is surfaced as a yellow message + exit code 1."""
@@ -307,7 +318,7 @@ def test_resume_command_without_artifact_reports_nothing_to_resume(
     monkeypatch.setattr(
         "clawstu.cli_chat.run_resume_session", _raises,
     )
-    result = runner.invoke(app, ["resume", "ada"])
+    result = runner.invoke(app, ["warm-start", "ada"])
     assert result.exit_code == 1
     stdout = _plain(result.stdout)
     assert "nothing to resume" in stdout

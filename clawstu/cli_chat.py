@@ -652,11 +652,67 @@ def _render_session_summary(
     )
 
 
+def run_chat_session_from_bundle(
+    *,
+    profile: LearnerProfile,
+    session: Session,
+    io: ChatIO | None = None,
+    state: AppState | None = None,
+) -> None:
+    """Resume a session from a pre-loaded profile and session.
+
+    Called by ``clawstu resume <session_id>`` after the CLI layer has
+    already located the session and rehydrated the profile from
+    persistence. Drops straight into the teach loop without
+    onboarding or warm-start artifact loading.
+    """
+    resolved_io: ChatIO = io or _RichChatIO()
+    try:
+        asyncio.run(
+            _run_async_from_bundle(profile, session, resolved_io, state),
+        )
+    except KeyboardInterrupt:
+        resolved_io.say(
+            "\n> Pausing session...\n"
+            "  Checkpoint saved. Run `clawstu resume` to pick this "
+            "back up.",
+            border_style="yellow",
+        )
+        raise SystemExit(0) from None
+
+
+async def _run_async_from_bundle(
+    profile: LearnerProfile,
+    session: Session,
+    io: ChatIO,
+    state: AppState | None,
+) -> None:
+    """Async body of :func:`run_chat_session_from_bundle`."""
+    io.say(OPENING_BANNER, panel_title="Stuart", border_style="blue")
+    ctx = _build_chat_context(state)
+    bundle = SessionBundle(profile=profile, session=session)
+    ctx.state.put(bundle)
+
+    io.say("> Resuming session...")
+    io.say(
+        f"  Session: {session.id}\n"
+        f"  Learner: {profile.learner_id}\n"
+        f"  Domain: {session.domain.value}\n"
+        f"  Provider: {_format_provider_label(ctx.router)}",
+    )
+
+    _run_teach_loop(io, ctx, profile, session)
+    ctx.runner.close(profile, session)
+    ctx.state.drop(session.id)
+    _render_session_summary(io, profile, session)
+
+
 __all__ = [
     "OPENING_BANNER",
     "ChatIO",
     "ChatInputs",
     "NoArtifactError",
     "run_chat_session",
+    "run_chat_session_from_bundle",
     "run_resume_session",
 ]
