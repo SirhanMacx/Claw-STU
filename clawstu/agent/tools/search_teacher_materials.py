@@ -44,8 +44,8 @@ class SearchTeacherMaterialsTool(BaseTool):
             results = CurriculumKB(kb).search(query, limit=limit)
             rows = [{"title": r.title, "preview": r.snippet[:200]} for r in results]
             return json.dumps(rows) if rows else "No teacher materials found."
-        except Exception:
-            pass
+        except (ImportError, OSError, TypeError, AttributeError):
+            pass  # CurriculumKB unavailable — fall through to SQLite
 
         db = kb / "kb" / "sources.db"
         if not db.is_file():
