@@ -23,7 +23,6 @@ from clawstu.safety.content_filter import ContentFilter
 from clawstu.safety.escalation import EscalationHandler
 from clawstu.safety.gate import InboundSafetyGate
 
-
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -85,10 +84,7 @@ class EchoToolCallProvider:
         model: str | None = None,
     ) -> LLMResponse:
         self._call_count += 1
-        if self._call_count == 1:
-            text = self._tool_call
-        else:
-            text = "Here is what I generated for you."
+        text = self._tool_call if self._call_count == 1 else "Here is what I generated for you."
         return LLMResponse(
             text=text,
             provider="echo",
